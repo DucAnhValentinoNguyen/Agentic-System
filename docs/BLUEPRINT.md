@@ -63,6 +63,6 @@ See the diagram in the [README](../README.md). In words:
 | 3 days | Built over more, extended with research mode, messaging, persistence |
 
 ## 6. Known limits and open items
-Conversation state is in memory; no automated CD; judge uncalibrated; research mode helps retrieval (+0.125 recall) but
+Conversation state is in memory; no automated CD; judge uncalibrated; research mode helps retrieval (+0.05 to +0.125 recall across two runs) but
 answer quality is unmeasured and it can't fix vocabulary gaps; free-tier judge quota (200k tokens/day) limits online scoring.
 Open: human labels to calibrate the judge, a local-model benchmark write-up, automated deploys.

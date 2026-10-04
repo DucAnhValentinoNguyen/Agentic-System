@@ -33,7 +33,7 @@ Booking and message branches collect details, propose, **`interrupt()` until the
 | Area | Implementation | Evidence |
 |---|---|---|
 | Orchestration | LangGraph: routing, **research mode** (plan, parallel `Send` fan-out, reflect loop), human-confirmation `interrupt()`, structured outputs with a strong-model retry | 24 unit tests, `docs/experiment.md` |
-| Multi-step reasoning | complex questions are split, searched in parallel, checked for gaps and re-searched; each step streams to the chat | recall 0.685 to 0.810 (+0.125, 95% CI [+0.05, +0.22]) |
+| Multi-step reasoning | complex questions are split, searched in parallel, checked for gaps and re-searched; each step streams to the chat | evidence recall +0.05 to +0.125 over plain RAG across two runs (second run's 95% CI just touches zero) |
 | Tool use / MCP | FastMCP server over stdio (calendar + send-mail tools), discovered via `langchain-mcp-adapters` | live booking and live message tested |
 | Booking and messages | confirm-before-act, deterministic event id, 409 reconciliation, one booking per email, durable daily caps, no auto-retry on send | 10 tests incl. timeout-after-insert |
 | Retrieval | separate gRPC service, Vertex embeddings + BM25, deadline + in-process fallback | 4 gRPC tests |

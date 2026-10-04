@@ -65,16 +65,20 @@ site sections that must be found (gold anchors). `evals/retrieval_study.py` runs
 the answer node, so only **evidence recall** (share of gold sections retrieved) is measured: deterministic, no judge,
 3 repeats per question.
 
-| Evidence recall (mean over 12 questions) | |
-|---|---|
-| raw question as the query (no LLM) | 0.667 |
-| plain RAG (LLM-rewritten query, the production path) | 0.685 |
-| **research mode** | **0.810** |
-| research - plain | **+0.125, 95% CI [+0.051, +0.218]** |
+| Evidence recall (mean over 12 questions, 3 repeats each) | Run 1 (3 Oct) | Run 2 (5 Oct, after the fixes below) |
+|---|---|---|
+| raw question as the query (no LLM) | 0.667 | 0.639 |
+| plain RAG (LLM-rewritten query, the production path) | 0.685 | 0.750 |
+| **research mode** | **0.810** | **0.799** |
+| research - plain | **+0.125, 95% CI [+0.051, +0.218]** | **+0.049, 95% CI [0.000, +0.104]** |
 
-Plain RAG is also unstable: its recall for the *same* question varies by about 0.21 between runs (mean range per
-question) because the LLM writes a different search query each time; research mode varies by 0.15, since it always
-also searches the original question.
+**Read this as a modest, real-looking gain, not +0.125.** Research mode itself barely moved between runs (0.810 and
+0.799). What changed is the *plain* baseline (0.685 to 0.750): its recall for the same question varies by about 0.16 to
+0.21 between runs because the LLM writes a different search query each time, while research mode varies by 0.08 to 0.15
+since it always also searches the original question. Run 1 happened to catch plain RAG on a bad day. Pooling the two
+runs the gain is roughly +0.09, and the second run's interval just touches zero. A third run would narrow it further.
+Run 2 came after two changes (follow-up questions skip the planner; near-duplicate searches are dropped) and shows
+neither hurt research-mode recall.
 
 **Cost.** A throttled-but-complete dev run measured roughly +3.4 to +7.8 s median latency and up to about 2x cost per
 answer (the research path makes 6-8 model calls). So production uses it only when the classifier flags a question as
@@ -85,7 +89,7 @@ complex (`RESEARCH_MODE=auto`): 12/12 multi-hop questions are flagged, 2/28 sing
   (INC-005); the earlier judged runs were also contaminated by provider rate limits (degraded answers, fallbacks to a
   weaker model). Better evidence does not by itself guarantee a better answer.
 - **A clean held-out set.** I wrote the 12 questions and fixed one design flaw (research mode could retrieve less than
-  plain RAG; fixed by always searching the original question) after seeing 4 of them. Treat the +0.125 as a development
+  plain RAG; fixed by always searching the original question) after seeing 4 of them. Treat the gain as a development
   result.
 - **Persistent weak spots.** "Which of his projects have private code?" stays at recall 0.25 in 2 of 3 runs: the site says
   "Repository private" / "not mine to publish", which neither keyword nor embedding search connects to "private code".

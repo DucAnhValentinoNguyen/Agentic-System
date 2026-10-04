@@ -25,6 +25,7 @@ class Classification(BaseModel):
     intent: Intent
     search_query: str = ""
     complex: bool = False  # several parts, a comparison, or an overview across many items
+    followup: bool = False  # only makes sense given earlier turns ("tell me more", "how is it trained?")
 
 
 class Plan(BaseModel):
@@ -46,6 +47,7 @@ class State(TypedDict, total=False):
     citations: list[dict]
     degraded: bool
     complex: bool
+    followup: bool
     research: str
     qid: str
     plan: list[str]
@@ -63,7 +65,7 @@ class State(TypedDict, total=False):
 
 
 CLASSIFY = """You route messages for an assistant on Duc-Anh Nguyen's portfolio website.
-Return compact single-line JSON: {"intent": ..., "search_query": ..., "complex": ...}
+Return compact single-line JSON: {"intent": ..., "search_query": ..., "complex": ..., "followup": ...}
 intent is one of:
 - "question": anything about Duc-Anh, his work, projects, skills, education, publications, contact
 - "booking": the visitor wants to meet, call or schedule time with him
@@ -76,6 +78,8 @@ time slot, or confirm/cancel are intent "booking".
 complex: true when answering needs information gathered from SEVERAL places on the site: it
 asks "which of his projects/papers/tools...", "list", "all", "across", "compare", or an overview or
 summary of many items, or has several parts. false when one project or one fact answers it.
+followup: true when the message only makes sense given the earlier turns (for example "tell me
+more", "why?", "and the second one?", "how is it trained?"); false when it is self-contained.
 search_query: a standalone search query for the question, resolving references to earlier turns.
 Empty for other intents."""
 
@@ -174,6 +178,27 @@ does the evidence contain the needed information? Return compact single-line JSO
 {"sufficient": true/false, "missing_queries": ["new search query for what is missing"]}
 Propose at most 2 missing_queries, only when something specific is missing."""
 
+QUERY_STOP = {"the", "a", "an", "of", "and", "in", "to", "for", "his", "he", "on", "with", "what", "how", "is", "are"}
+
+
+def _terms(q: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]+", q.lower()) if t not in QUERY_STOP}
+
+
+def similar(a: str, b: str, threshold: float = 0.75) -> bool:
+    x, y = _terms(a), _terms(b)
+    return bool(x and y) and len(x & y) / len(x | y) >= threshold
+
+
+def unique_queries(queries: list[str], already: list[str] | None = None) -> list[str]:
+    """Drop queries that nearly repeat an earlier one (this round or a previous round)."""
+    kept: list[str] = []
+    for q in queries:
+        if not any(similar(q, p) for p in [*(already or []), *kept]):
+            kept.append(q)
+    return kept
+
+
 MARK = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -202,13 +227,16 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar):
             # Invalid output never changes state: fall back to treating it as a question.
             log.warning("classify_fallback", error=str(e)[:200])
             c = Classification(intent="question", search_query=state["question"])
-        return {"intent": c.intent, "complex": c.complex, "plan": [], "research_round": 0,
+        return {"intent": c.intent, "complex": c.complex, "followup": c.followup, "plan": [], "research_round": 0,
                 "search_query": c.search_query or state["question"],
                 "records": recs}
 
     def route_question(s: State) -> str:
         mode = s.get("research") or settings.research_mode
-        return "plan" if mode == "force" or (mode == "auto" and s.get("complex")) else "retrieve"
+        # A follow-up already carries a standalone search_query rewritten from the conversation, so the
+        # single-search path is enough and much cheaper than planning a new decomposition.
+        auto = mode == "auto" and s.get("complex") and not s.get("followup")
+        return "plan" if mode == "force" or auto else "retrieve"
 
     async def plan(state: State) -> dict:
         """Break a complex question into 2-4 independent searches."""
@@ -262,6 +290,8 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar):
                     {"role": "user", "content": f"Question: {state['question']}\nSub-questions: "
                                                 f"{state['plan']}\nEvidence:\n{evidence}"}], recs, 800)
                 missing = [] if r.sufficient else [q.strip() for q in r.missing_queries if q.strip()][:2]
+                # Do not repeat a search that already ran; if nothing new remains, answer with what we have.
+                missing = unique_queries(missing, [x["q"] for x in mine])
             except (ProviderError, ValidationError):
                 pass
         if not missing:
@@ -274,7 +304,7 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar):
         if not s.get("plan"):
             return "retrieve"
         # The original question is always searched too: the union can never retrieve less than plain RAG.
-        queries = [s["question"], *[q for q in s["plan"] if q != s["question"]]]
+        queries = unique_queries([s["question"], *s["plan"]])
         return [Send("research", {"sub": q, "qid": s["qid"]}) for q in queries]
 
     def after_reflect(s: State):
