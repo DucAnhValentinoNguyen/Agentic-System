@@ -79,6 +79,8 @@ input{flex:1;min-width:0;padding:9px 11px;border:1px solid #c9c9c9;border-radius
 button.send{border:0;border-radius:10px;padding:0 14px;background:#1a1a1a;color:#fff;font:inherit;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}
 .note{flex-shrink:0;padding:0 14px 8px;color:#777;font-size:12px}
+/* While the chat is open the button steps aside; it keeps its box so the window's anchor math still works. */
+:host(.chat-open) .fab{visibility:hidden;pointer-events:none}
 @media(max-width:600px){
 .fab-long{display:none}.fab-short{display:inline}
 .fab{padding:10px 16px}
