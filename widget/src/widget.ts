@@ -67,6 +67,15 @@ const STYLE = `
 .expand{position:absolute;right:96px;top:6px;width:44px;height:44px;border:0;background:transparent;color:#1a1a1a;font-size:24px;cursor:pointer}
 .resize{position:absolute;left:0;top:0;width:32px;height:32px;padding:0;border:0;background:transparent;color:#666;font-size:20px;cursor:nwse-resize;touch-action:none;user-select:none;z-index:1}
 .mute:hover{opacity:1}
+.rz{position:absolute;z-index:2;touch-action:none;user-select:none}
+.rz-n{top:0;left:32px;right:10px;height:6px;cursor:ns-resize}
+.rz-s{bottom:0;left:10px;right:10px;height:6px;cursor:ns-resize}
+.rz-e{right:0;top:10px;bottom:10px;width:6px;cursor:ew-resize}
+.rz-w{left:0;top:32px;bottom:10px;width:6px;cursor:ew-resize}
+.rz-ne{top:0;right:0;width:10px;height:10px;z-index:3;cursor:nesw-resize}
+.rz-sw{bottom:0;left:0;width:10px;height:10px;z-index:3;cursor:nesw-resize}
+.rz-se{bottom:0;right:0;width:10px;height:10px;z-index:3;cursor:nwse-resize}
+.panel.expanded .rz{display:none}
 .dot{position:absolute;top:-3px;right:-3px;width:12px;height:12px;border-radius:50%;background:#e5484d;border:2px solid #fff}
 .fab.seen .dot{display:none}
 @media (prefers-reduced-motion:no-preference){
@@ -82,6 +91,7 @@ button:disabled{opacity:.5;cursor:default}
 /* While the chat is open the button steps aside; it keeps its box so the window's anchor math still works. */
 :host(.chat-open) .fab{visibility:hidden;pointer-events:none}
 @media(max-width:600px){
+.rz{display:none}
 .fab-long{display:none}.fab-short{display:inline}
 .fab{padding:10px 16px}
 :host(.chat-open) .fab{display:none}
@@ -98,7 +108,8 @@ function mount(): void {
   <div class="safe-area" aria-hidden="true"></div>
   <button class="fab" aria-expanded="false" aria-label="Chat with Duc-Anh’s twin" title="Tap to chat, or drag to move"><span class="fab-icon" aria-hidden="true">✦</span><span class="fab-long">Hi, I'm Duc-Anh's twin. Ask me about him</span><span class="fab-short">Ask my twin</span><span class="dot" aria-hidden="true"></span></button>
   <div class="panel" role="dialog" aria-label="Chat about Duc-Anh Nguyen">
-    <button class="resize" type="button" aria-label="Resize chat. Drag this corner or use arrow keys." title="Drag to resize; arrow keys also work">↖</button>
+    <button class="resize" data-edge="nw" type="button" aria-label="Resize chat. Drag any edge or corner, or use the arrow keys on this corner." title="Drag to resize; arrow keys also work">↖</button>
+    <div class="rz rz-n" data-edge="n"></div><div class="rz rz-s" data-edge="s"></div><div class="rz rz-e" data-edge="e"></div><div class="rz rz-w" data-edge="w"></div><div class="rz rz-ne" data-edge="ne"></div><div class="rz rz-sw" data-edge="sw"></div><div class="rz rz-se" data-edge="se"></div>
     <div class="head">Duc-Anh's twin<button class="expand" type="button" aria-label="Expand chat" title="Expand chat">⛶</button><button class="close" type="button" aria-label="Close chat">×</button><button class="mute" type="button" aria-label="Mute notification sound" title="Mute notification sound"></button><small>Answers come from this site, with links to the source section.</small><span class="connection" role="status"></span></div>
     <div class="log" aria-live="polite"></div>
     <div class="note">An AI assistant. Messages are logged to improve it; don't share private data.</div>
@@ -456,49 +467,55 @@ function mount(): void {
     expand.title = expanded ? "Restore chat size" : "Expand chat";
     expand.setAttribute("aria-label", expand.title);
     expand.setAttribute("aria-pressed", String(expanded));
+    panel.classList.toggle("expanded", expanded);
   };
   const saveSize = (): void => {
     try { localStorage.setItem("twin-size", JSON.stringify(size)); } catch { /* optional */ }
   };
-  const resizeTo = (rect: DOMRect, width: number, height: number): void => {
+  type Edge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+  // Move the dragged edges by (dx, dy); the opposite edges stay put. Always kept inside the viewport.
+  const resizeBy = (edge: Edge, rect: DOMRect, dx: number, dy: number): void => {
     const v = viewport();
-    const maxWidth = Math.max(0, rect.right - v.x), maxHeight = Math.max(0, rect.bottom - v.y);
-    size = {
-      width: clamp(width, Math.min(280, maxWidth), maxWidth),
-      height: clamp(height, Math.min(300, maxHeight), maxHeight),
-    };
-    panelPosition = { x: rect.right - size.width, y: rect.bottom - size.height };
+    const minW = Math.min(280, v.right - v.x), minH = Math.min(300, v.bottom - v.y);
+    let { left, right, top, bottom } = rect;
+    if (edge.includes("w")) left = clamp(rect.left + dx, v.x, rect.right - minW);
+    if (edge.includes("e")) right = clamp(rect.right + dx, rect.left + minW, v.right);
+    if (edge.includes("n")) top = clamp(rect.top + dy, v.y, rect.bottom - minH);
+    if (edge.includes("s")) bottom = clamp(rect.bottom + dy, rect.top + minH, v.bottom);
+    size = { width: right - left, height: bottom - top };
+    panelPosition = { x: left, y: top };
     expanded = false;
     paintExpand();
     layout();
   };
-  let resizing: { id: number; x: number; y: number; rect: DOMRect } | null = null;
-  resize.addEventListener("pointerdown", (e) => {
-    if (!e.isPrimary || e.button !== 0) return;
-    e.preventDefault();
-    resizing = { id: e.pointerId, x: e.clientX, y: e.clientY, rect: panel.getBoundingClientRect() };
-    resize.setPointerCapture(e.pointerId);
-  });
-  resize.addEventListener("pointermove", (e) => {
-    if (!resizing || resizing.id !== e.pointerId) return;
-    resizeTo(resizing.rect, resizing.rect.width + resizing.x - e.clientX,
-             resizing.rect.height + resizing.y - e.clientY);
-  });
+  let resizing: { id: number; edge: Edge; x: number; y: number; rect: DOMRect } | null = null;
   const endResize = (e: PointerEvent): void => {
     if (!resizing || resizing.id !== e.pointerId) return;
     resizing = null;
     saveSize();
   };
-  resize.addEventListener("pointerup", endResize);
-  resize.addEventListener("pointercancel", endResize);
-  resize.addEventListener("lostpointercapture", endResize);
+  for (const h of [resize, ...Array.from(root.querySelectorAll<HTMLElement>(".rz"))]) {
+    h.addEventListener("pointerdown", (e) => {
+      if (!e.isPrimary || e.button !== 0 || expanded) return;
+      e.preventDefault();
+      resizing = { id: e.pointerId, edge: (h.dataset.edge ?? "nw") as Edge, x: e.clientX, y: e.clientY,
+                   rect: panel.getBoundingClientRect() };
+      h.setPointerCapture(e.pointerId);
+    });
+    h.addEventListener("pointermove", (e) => {
+      if (!resizing || resizing.id !== e.pointerId) return;
+      resizeBy(resizing.edge, resizing.rect, e.clientX - resizing.x, e.clientY - resizing.y);
+    });
+    h.addEventListener("pointerup", endResize);
+    h.addEventListener("pointercancel", endResize);
+    h.addEventListener("lostpointercapture", endResize);
+  }
   resize.addEventListener("keydown", (e) => {
-    const dx = e.key === "ArrowLeft" ? 32 : e.key === "ArrowRight" ? -32 : 0;
-    const dy = e.key === "ArrowUp" ? 32 : e.key === "ArrowDown" ? -32 : 0;
+    const dx = e.key === "ArrowLeft" ? -32 : e.key === "ArrowRight" ? 32 : 0;
+    const dy = e.key === "ArrowUp" ? -32 : e.key === "ArrowDown" ? 32 : 0;
     if (!dx && !dy) return;
     e.preventDefault();
-    const rect = panel.getBoundingClientRect();
-    resizeTo(rect, rect.width + dx, rect.height + dy);
+    resizeBy("nw", panel.getBoundingClientRect(), dx, dy);
     saveSize();
   });
   expand.onclick = () => {
