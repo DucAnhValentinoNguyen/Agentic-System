@@ -1,0 +1,40 @@
+{"id": "nkd", "question": "What is the 24% WAPE result from?", "answerable": true, "golden": ["NKD store sales forecasting", "14-day-ahead forecasts"], "split": "dev"}
+{"id": "gnhf-183", "question": "How badly did the gnhf token cap undercount spend, and why?", "answerable": true, "golden": ["183x", "only two of four token buckets were stored (cache reads/writes dropped)"], "split": "heldout"}
+{"id": "gnhf-pr", "question": "Which gnhf pull request got merged and in which release?", "answerable": true, "golden": ["PR #213", "v0.1.46"], "split": "heldout"}
+{"id": "monai", "question": "What did his MONAI fix change?", "answerable": true, "golden": ["the aggregate score now folds in all valid per-class ranks", "a fully collapsed minority class was previously invisible"], "split": "heldout"}
+{"id": "kaggle-rank", "question": "What rank did he reach in the AI Agent Security competition?", "answerable": true, "golden": ["rank 461", "of 4,187 teams"], "split": "heldout"}
+{"id": "traceforge", "question": "What did he build at the European Hackathon League?", "answerable": true, "golden": ["TraceForge", "prompt to manufacturable circuit board"], "split": "dev"}
+{"id": "traceforge-role", "question": "What was his role in TraceForge?", "answerable": true, "golden": ["distributor-availability layer", "Mouser integration", "web-scraping sub-agent"], "split": "heldout"}
+{"id": "scipali-acc", "question": "What accuracy did SciPaLI reach?", "answerable": true, "golden": ["72.2% exact-match"], "split": "heldout"}
+{"id": "scipali-int4", "question": "How much GPU memory did int4 quantization save in SciPaLI?", "answerable": true, "golden": ["51%"], "split": "dev"}
+{"id": "scipali-ablation", "question": "Which single change was worth +16 points in SciPaLI?", "answerable": true, "golden": ["a prompt-ordering fix found by systematic ablation"], "split": "heldout"}
+{"id": "surgground-gpu", "question": "What hardware is SurgGround trained on?", "answerable": true, "golden": ["a single 24 GB consumer GPU", "RTX 4090"], "split": "dev"}
+{"id": "zeiss", "question": "What is the ZEISS collaboration about?", "answerable": true, "golden": ["multimodal vision-language models for surgical video", "with LMU Munich"], "split": "dev"}
+{"id": "ssl-compare", "question": "Which self-supervised methods did he compare for the surgical encoder?", "answerable": true, "golden": ["DINO v1", "LeJEPA"], "split": "dev"}
+{"id": "ssl-winner", "question": "Which setting won the pretraining comparison and why?", "answerable": true, "golden": ["DINO/ImageNet", "passes on all 5 HyperKvasir tasks while LeJEPA regresses"], "split": "heldout"}
+{"id": "gastronet", "question": "How large is the GastroNet-5M corpus and how many optimizer steps per setting?", "answerable": true, "golden": ["about 4.9M images", "113,064 steps"], "split": "dev"}
+{"id": "bsc-grade", "question": "What was his final B.Sc. grade?", "answerable": true, "golden": ["1.8"], "split": "dev"}
+{"id": "ta", "question": "What did he do as a teaching assistant?", "answerable": true, "golden": ["two courses: Logic & Discrete Structures and Calculus", "100+ students each", "exercise sessions and grading"], "split": "heldout"}
+{"id": "languages", "question": "Which programming languages does he list?", "answerable": true, "golden": ["Python", "SQL", "C++/CUDA", "R", "Bash", "LaTeX"], "split": "heldout"}
+{"id": "edgeloop", "question": "What is EdgeLoop?", "answerable": true, "golden": ["ML from training set to device firmware", "inference implemented in both Python and C"], "split": "dev"}
+{"id": "service-desk", "question": "What is the Service Desk AI project?", "answerable": true, "golden": ["bounded multi-agent operations desk", "protected writes held behind IT approval"], "split": "dev"}
+{"id": "isprs", "question": "What is the status of his ISPRS paper?", "answerable": true, "golden": ["second author", "in preparation, not yet submitted (per the site)"], "split": "heldout"}
+{"id": "wildboar", "question": "Who was the wildboar statistical consulting for?", "answerable": true, "golden": ["Mengxi Kou", "LMU / Carson Center"], "split": "dev"}
+{"id": "lidar", "question": "What does the archaeological LiDAR project do?", "answerable": true, "golden": ["autoencoder segments LiDAR point clouds over ten hectares", "flags anomalies for expert review"], "split": "heldout"}
+{"id": "thesis", "question": "What was his bachelor thesis about?", "answerable": true, "golden": ["a decision-theoretic acquisition policy for Bayesian optimization"], "split": "heldout"}
+{"id": "cic", "question": "What was the Cloud Innovation Challenge?", "answerable": true, "golden": ["LMU x AWS Velocity Racing case study", "an architecture proposal, not a production deployment"], "split": "heldout"}
+{"id": "pipeline", "question": "Does the data pipeline project quarantine bad records?", "answerable": true, "golden": ["yes, failing records are quarantined with a logged reason", "bronze, silver, quarantine, gold"], "split": "heldout"}
+{"id": "clouds", "question": "Which cloud platforms and services does he list?", "answerable": true, "golden": ["GCP (Vertex AI, Cloud Run, Cloud Build)", "AWS (S3, EC2/SageMaker, Terraform)"], "split": "heldout"}
+{"id": "cvpr", "question": "What is the target venue of his first-author paper?", "answerable": true, "golden": ["CVPR 2027", "test-time domain generalization for endoscopy via optimal transport"], "split": "heldout"}
+{"id": "gpa-eth", "question": "What was his GPA at ETH Zurich?", "answerable": false, "golden": [], "split": "dev"}
+{"id": "stars", "question": "How many GitHub stars does his SurgGround repository have?", "answerable": false, "golden": [], "split": "heldout"}
+{"id": "salary", "question": "What salary does he expect?", "answerable": false, "golden": [], "split": "dev"}
+{"id": "italian", "question": "How well does he speak Italian?", "answerable": false, "golden": [], "split": "heldout"}
+{"id": "lidar-f1", "question": "What F1 score did the LiDAR segmentation reach?", "answerable": false, "golden": [], "split": "heldout"}
+{"id": "surg-baseline", "question": "What zero-shot accuracy did SurgGround's baseline get?", "answerable": false, "golden": [], "split": "heldout"}
+{"id": "intern", "question": "Which company did he intern at last summer?", "answerable": false, "golden": [], "split": "heldout"}
+{"id": "medals", "question": "How many Kaggle gold medals does he have?", "answerable": false, "golden": [], "split": "dev"}
+{"id": "google", "question": "What did he work on at Google?", "answerable": false, "golden": [], "split": "heldout"}
+{"id": "phone", "question": "What is his phone number?", "answerable": false, "golden": [], "split": "heldout"}
+{"id": "food", "question": "What is his favourite food?", "answerable": false, "golden": [], "split": "dev"}
+{"id": "talks", "question": "Which conferences has he given talks at?", "answerable": false, "golden": [], "split": "dev"}

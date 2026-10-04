@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.env
+*.tfstate*
+.terraform/
+node_modules/
+widget/dist/
+client_secret*.json
+oauth_client.json
+token*.json
+evals/results/
+token_calendar.json
+docs/*.pdf
+widget/e2e/*.png
+
+# Private notes: never commit
+docs/private/

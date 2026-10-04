@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package twin.retrieval.v1;
+
+service Retrieval {
+  // Hybrid (keyword + embedding) search over the curated site corpus.
+  rpc Search(SearchRequest) returns (SearchResponse);
+}
+
+message SearchRequest {
+  string query = 1;
+  int32 k = 2;  // 1..10, default 5
+}
+
+message Chunk {
+  string anchor = 1;
+  string title = 2;
+  string url = 3;
+  string text = 4;
+  int32 part = 5;
+}
+
+message SearchResponse {
+  repeated Chunk chunks = 1;
+  bool used_embeddings = 2;  // false when the embedding call failed and only keywords ranked
+}

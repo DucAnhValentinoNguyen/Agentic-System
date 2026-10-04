@@ -1,0 +1,18 @@
+# Adversarial regression suite against a running deployment (public endpoint, no secrets needed).
+# Run it after every deploy; it fails the job if any case regresses.
+name: security-gate
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: WebSocket URL of the deployment
+        default: wss://twin-agent-api-7yjacf5bma-ey.a.run.app/ws/chat
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run python evals/run_security.py --url "${{ inputs.url }}"
