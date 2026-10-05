@@ -72,9 +72,9 @@ resource "google_monitoring_alert_policy" "degraded" {
 
 resource "google_monitoring_alert_policy" "fallback_rate" {
   display_name          = "Twin: >20% of turns needed a fallback provider"
-  combiner              = "OR"
+  combiner              = "AND" # ratio high AND enough traffic for a ratio to mean anything
   notification_channels = local.channels
-  documentation { content = "Primary provider is failing or throttling. Fallback keeps users served but costs latency; see docs/incidents/INC-001." }
+  documentation { content = "Primary provider is failing or throttling, with enough traffic (10+ turns in 15 min) for the share to mean something. Fallback keeps users served but costs latency; see docs/incidents/INC-001 and INC-009." }
   conditions {
     display_name = "fallback share over 15 min"
     condition_threshold {
@@ -89,6 +89,20 @@ resource "google_monitoring_alert_policy" "fallback_rate" {
         cross_series_reducer = "REDUCE_SUM"
       }
       denominator_aggregations {
+        alignment_period     = "900s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+    }
+  }
+  conditions {
+    display_name = "at least 10 turns in 15 min"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/twin_turns\" AND resource.type=\"cloud_run_revision\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 9
+      duration        = "0s"
+      aggregations {
         alignment_period     = "900s"
         per_series_aligner   = "ALIGN_SUM"
         cross_series_reducer = "REDUCE_SUM"
@@ -120,7 +134,7 @@ resource "google_monitoring_alert_policy" "turn_failures" {
 
 resource "google_monitoring_alert_policy" "latency" {
   display_name          = "Twin: p95 turn latency above 8 s"
-  combiner              = "OR"
+  combiner              = "AND" # slow AND at least a few turns, so one slow chat does not page anyone
   notification_channels = local.channels
   conditions {
     display_name = "p95 > 8000 ms for 10 min"
@@ -136,7 +150,21 @@ resource "google_monitoring_alert_policy" "latency" {
       }
     }
   }
-  depends_on = [google_logging_metric.turn_latency]
+  conditions {
+    display_name = "at least 5 turns in 10 min"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/twin_turns\" AND resource.type=\"cloud_run_revision\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 4
+      duration        = "0s"
+      aggregations {
+        alignment_period     = "600s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+    }
+  }
+  depends_on = [google_logging_metric.turn_latency, google_logging_metric.counter]
 }
 
 resource "google_monitoring_alert_policy" "cloud_run_5xx" {
