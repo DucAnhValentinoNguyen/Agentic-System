@@ -1,5 +1,6 @@
 """LangGraph: classify -> retrieve -> answer (streamed) -> finalize (validated citations)."""
 
+import datetime as dt
 import operator
 import re
 import uuid
@@ -13,6 +14,7 @@ from langgraph.types import Send, interrupt
 from pydantic import BaseModel, ValidationError
 
 from .. import booking as bk
+from .. import slots as sl
 from ..config import settings
 from ..gateway.router import CallRecord, ProviderError, Router
 
@@ -56,6 +58,7 @@ class State(TypedDict, total=False):
     variant: str
     verify: dict
     booking: dict
+    last_booking: dict
     leave: dict
     messages_sent: int
     choices: list[str]
@@ -95,6 +98,9 @@ Rules:
   life, or opinions he has not published.
 - Absence of evidence is not evidence of absence: never say he did NOT do, study or work on
   something unless a source says so. Say you don't have that information instead.
+- If the visitor asks whether he worked, studied or did something at a particular organisation and the sources
+  do not say so, say you don't have that information. Do not offer a loosely related fact (for example a
+  competition that organisation hosted) as if it answered the question.
 - Be brief: {length}, plain text, no markdown headings. Answer in the visitor's language.
 
 Sources:
@@ -210,7 +216,10 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar):
         stage = b.get("stage")
         q = state["question"].strip()
         labels = {x["label"] for x in b.get("slots") or []}
-        if (stage in ("collecting", "choosing") and (q.isdigit() or "@" in q or q in labels)) or (
+        chip = re.fullmatch(r"(30|60|90) min|Extend to (60|90) min|Book another time", q)
+        if (chip and (stage or state.get("last_booking"))) or (
+            stage in ("collecting", "choosing", "length") and (q.isdigit() or "@" in q or q in labels)
+        ) or (
             stage == "offered" and q == "Book it for me here"
         ):
             # Unambiguous follow-ups to an active booking skip the classifier entirely.
@@ -219,6 +228,9 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar):
             # Free text (the message itself) must not be re-classified while we are collecting it.
             return {"intent": "message", "search_query": "", "records": []}
         note = f"\nA booking is in progress (stage: {stage})." if stage else ""
+        if state.get("last_booking"):
+            note += ("\nA call was just booked for this visitor in this chat. Messages about making it longer, "
+                     "changing its length, or booking another time are intent \"booking\".")
         msgs = [{"role": "system", "content": CLASSIFY + note}, *state.get("history", [])[-6:],
                 {"role": "user", "content": state["question"]}]
         try:
@@ -446,130 +458,229 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar):
 def make_booking_nodes(router: Router, calendar: bk.Calendar):
     EXTRACT = (
         "Extract booking details from the conversation. Return JSON with keys name, email, topic, "
-        "slot_choice (1-based number of the slot the visitor picked, or null), cancel (true if they "
-        "want to stop). Use null for anything not stated. Never invent values. "
-        "Answer with compact single-line JSON.\n"
-        "Slots shown to the visitor: {slots}"
+        "slot_choice (1-based number of the slot the visitor picked, or null), minutes (the length they ask "
+        "for a NEW meeting: 30, 60 or 90, or null), extend_to_minutes (the TOTAL length in minutes they want "
+        "for an EXISTING booked meeting, for example 60, 90 or 120, else null), cancel (true if they want to "
+        "stop). Use null for "
+        "anything not stated. Never invent values. Answer with compact single-line JSON.\n"
+        "Slots shown to the visitor: {slots}\n{known}"
     )
+    SAME = ("Earlier in this chat the visitor booked a call: name={name}, email={email}, topic={topic}. "
+            "If they say 'same name/email/topic/details', use these values.")
+    ASK = {"name": "your name", "email": "your email address", "topic": "what you'd like to talk about"}
+
+    def minutes_text(n: int) -> str:
+        return f"{30 * n}-minute"
+
+    def to_slots(minutes: int | None) -> int | None:
+        return minutes // 30 if minutes in (30, 60, 90) else None
+
+    def after_booking_chips(n: int, remaining: int) -> list[str]:
+        chips = [f"Extend to {30 * k} min" for k in range(n + 1, min(3, n + remaining) + 1)]
+        return [*chips, "Book another time"] if remaining > 0 else []
 
     async def book_collect(state: State) -> dict:
         write = get_stream_writer()
         b = dict(state.get("booking") or {})
-        if not b.get("stage"):
+        last = dict(state.get("last_booking") or {})
+        qs = state["question"].strip()
+        recs: list[CallRecord] = []
+
+        def say(text: str, choices: list[str] | None = None, **extra) -> dict:
+            write({"type": "delta", "text": text})
+            if choices:
+                write({"type": "choices", "options": choices})
+            return {"answer": text, "choices": choices or [], "confirmed": None, "records": recs, **extra}
+
+        if not b.get("stage") and not last:
             # A fresh request: point to the booking page first, and offer to do it right here.
             links = ([{"label": "Open the booking page", "url": settings.booking_page_url}]
                      if settings.booking_page_url else [])
             text = (("You can pick a time that suits you on Duc-Anh's booking page. "
                      "Or I can book it for you right here in the chat.") if links else
-                    "I can book a 30-minute call with Duc-Anh for you right here in the chat.")
+                    "I can book a call with Duc-Anh for you right here in the chat.")
             write({"type": "delta", "text": text})
-            return {"booking": {"stage": "offered"}, "answer": text,
-                    "choices": ["Book it for me here"], "confirmed": None, "records": [],
-                    "links": links}
-        if b["stage"] == "offered":
+            return {"booking": {"stage": "offered"}, "answer": text, "choices": ["Book it for me here"],
+                    "confirmed": None, "records": [], "links": links}
+        if b.get("stage") == "offered":
             b["stage"] = "collecting"
         slots = b.get("slots") or []
-        msgs = [{"role": "system", "content": EXTRACT.format(
-                    slots=[f"{i + 1}. {x['label']}" for i, x in enumerate(slots)] or "none yet")},
-                *state.get("history", [])[-6:], {"role": "user", "content": state["question"]}]
-        recs: list[CallRecord] = []
-        try:
-            f = await structured(router, bk.BookingFields, msgs, recs, 800)
-        except (ProviderError, ValidationError):
-            f = bk.BookingFields()
-        # Deterministic slot choice (a tapped label or a number) beats the model; the model's
-        # guess is only used for free-text like "the first one", and never on a bare yes/no.
-        qs = state["question"].strip()
+
+        # Deterministic reads of tapped chips beat the model.
+        chip_extend = re.fullmatch(r"Extend to (60|90) min", qs)
+        chip_len = re.fullmatch(r"(30|60|90) min", qs)
+        again = qs == "Book another time"
+        f = bk.BookingFields()
+        if not (chip_extend or chip_len or again):
+            known = SAME.format(**last) if last else ""
+            msgs = [{"role": "system", "content": EXTRACT.format(
+                        slots=[f"{i + 1}. {x['label']}" for i, x in enumerate(slots)] or "none yet", known=known)},
+                    *state.get("history", [])[-6:], {"role": "user", "content": state["question"]}]
+            try:
+                f = await structured(router, bk.BookingFields, msgs, recs, 800)
+            except (ProviderError, ValidationError):
+                f = bk.BookingFields()
+        if chip_extend:
+            f.extend_to_minutes = int(chip_extend.group(1))
+        if chip_len:
+            f.minutes = int(chip_len.group(1))
         by_label = next((i + 1 for i, x in enumerate(slots) if x["label"] == qs), None)
         if by_label:
             f.slot_choice = by_label
         elif qs.isdigit():
             f.slot_choice = int(qs)
-        elif bk.YES.match(qs) or qs.lower().startswith("no"):
+        elif bk.YES.match(qs) or qs.lower().startswith("no") or chip_len or chip_extend:
             f.slot_choice = None
         if f.cancel:
-            text = "No problem, I've dropped the booking. Ask again any time."
-            write({"type": "delta", "text": text})
-            return {"booking": {}, "answer": text, "records": recs}
+            return say("No problem, I've dropped the booking. Ask again any time.", booking={})
+
+        # ---- Extending a call that was booked earlier in this chat ----
+        if f.extend_to_minutes and not b.get("stage") in ("choosing", "length"):
+            target = to_slots(f.extend_to_minutes)
+            if not last or not target or target < 2:
+                return say("I can only extend a call that I booked for you in this chat, up to 90 minutes. "
+                           "Email Duc-Anh for anything else.", booking={})
+            try:
+                lim = await calendar.extension_limit(last["email"], last["start"])
+            except Exception as e:  # noqa: BLE001
+                log.error("extend_check_failed", error=str(e)[:200])
+                lim = {"status": "failed"}
+            if lim["status"] != "ok":
+                return say("I couldn't look up that booking just now. Please email "
+                           f"{settings.contact_email} and Duc-Anh will sort it out.", booking={})
+            cur, mx = lim["current"], lim["max_total"]
+            if target <= cur:
+                return say(f"Your call is already {30 * cur} minutes long.", booking={})
+            if mx <= cur:
+                return say("I can't extend it: the time right after your call isn't free, or you've used all "
+                           "3 half-hour slots. I can book another time instead.", ["Book another time"], booking={})
+            if target > mx:
+                return say(f"I can extend it up to {30 * mx} minutes. Would you like that?",
+                           [f"Extend to {30 * mx} min"], booking={})
+            start = dt.datetime.fromisoformat(last["start"])
+            text = (f"To confirm: extend your call with Duc-Anh on {start.strftime('%a %d %b, %H:%M')} to {30 * target} minutes, "
+                    f"until {(start + sl.SLOT * target).strftime('%H:%M')} Berlin time. Shall I extend it?")
+            out = say(text, ["Yes, extend it", "No, cancel"], booking={
+                "mode": "extend", "stage": "proposed", "name": last["name"], "email": last["email"],
+                "topic": last["topic"], "start": last["start"], "n": target})
+            out["history"] = [{"role": "user", "content": state["question"]}, {"role": "assistant", "content": text}]
+            return out
+
+        # ---- Booking a call (a new one, possibly with details reused from the last one) ----
+        if again and last:
+            b = {"stage": "collecting", **{k: last[k] for k in ("name", "email", "topic")}}
+        elif not b.get("stage"):
+            b = {"stage": "collecting"}
         if f.name:
             b["name"] = f.name.strip()[:80]
         if f.email and bk.EMAIL.fullmatch(f.email.strip()):
             b["email"] = f.email.strip()
         if f.topic:
             b["topic"] = f.topic.strip()[:300]
+        if f.minutes and to_slots(f.minutes):
+            b["want"] = to_slots(f.minutes)
         missing = [k for k in ("name", "email", "topic") if not b.get(k)]
-        choices: list[str] = []
         if missing:
             b["stage"] = "collecting"
-            ask = {"name": "your name", "email": "your email address",
-                   "topic": "what you'd like to talk about"}
-            text = ("Happy to set up a 30-minute call with Duc-Anh. Could you tell me "
-                    + " and ".join(ask[m] for m in missing) + "?")
-        elif not slots:
+            return say("Happy to set up a call with Duc-Anh. Could you tell me "
+                       + " and ".join(ASK[x] for x in missing) + "?", booking=b)
+        if not slots:
             try:
                 b["slots"] = slots = await calendar.free_slots()
             except Exception as e:  # noqa: BLE001
                 log.error("slots_failed", error=str(e)[:200])
-                text = ("I couldn't read the calendar just now. Please email "
-                        f"{settings.contact_email} instead.")
-                write({"type": "delta", "text": text})
-                return {"booking": {}, "answer": text, "records": recs}
+                return say("I couldn't read the calendar just now. Please email "
+                           f"{settings.contact_email} instead.", booking={})
             if not slots:
-                text = ("There are no free slots in the next week. Please email "
-                        f"{settings.contact_email}.")
-                b = {}
-            else:
-                b["stage"] = "choosing"
-                choices = [x["label"] for x in slots]
-                text = "Thanks! These times are free. Which one works for you?"
-        elif f.slot_choice and 1 <= f.slot_choice <= len(slots):
-            b["chosen"] = slots[f.slot_choice - 1]
-            b["stage"] = "proposed"
-            text = (f"To confirm: a 30-minute call with Duc-Anh on {b['chosen']['label']}, "
-                    f"for \"{b['topic']}\", booked under {b['name']} <{b['email']}>. "
-                    "Shall I book it?")
-            choices = ["Yes, book it", "No, cancel"]
-        else:
+                return say(f"There are no free slots in the next week. Please email {settings.contact_email}.",
+                           booking={})
             b["stage"] = "choosing"
-            choices = [x["label"] for x in slots]
-            text = "Which of these times works for you?"
-        write({"type": "delta", "text": text})
-        if choices:
-            write({"type": "choices", "options": choices})
-        return {"booking": b, "answer": text, "choices": choices, "confirmed": None,
-                "records": recs,
-                "history": [{"role": "user", "content": state["question"]},
-                            {"role": "assistant", "content": text}] if b.get("stage") == "proposed" else []}
+            return say("Thanks! These times are free. Which one works for you?", [x["label"] for x in slots],
+                       booking=b)
+        if f.slot_choice and 1 <= f.slot_choice <= len(slots):
+            b["chosen"] = slots[f.slot_choice - 1]
+        if b.get("chosen"):
+            try:
+                left = (await calendar.allowance(b["email"]))["remaining"]
+            except Exception:  # noqa: BLE001 - the booking step enforces the limit anyway
+                left = sl.MAX_SLOTS_PER_VISITOR
+            if left < 1:
+                return say("You already hold 3 half-hour slots with Duc-Anh, which is the most I can book "
+                           "for one person. Email him if you need more.", booking={})
+            cap = min(b["chosen"].get("max_slots", 1), left, sl.MAX_SLOTS_PER_VISITOR)
+            n = b.get("n_pick") or b.get("want")
+            if f.minutes and to_slots(f.minutes):
+                n = to_slots(f.minutes)
+            if n and n > cap:
+                b.pop("want", None)
+                b["stage"] = "length"
+                return say(f"Only {30 * cap} minutes fit there. How long would you like?",
+                           [f"{30 * k} min" for k in range(1, cap + 1)], booking=b)
+            if not n and cap > 1:
+                b["stage"] = "length"
+                return say("How long would you like the call to be?",
+                           [f"{30 * k} min" for k in range(1, cap + 1)], booking=b)
+            b["n"] = n or 1
+            b["stage"] = "proposed"
+            text = (f"To confirm: a {minutes_text(b['n'])} call with Duc-Anh on "
+                    f"{sl.label(dt.datetime.fromisoformat(b['chosen']['start']), b['n'])}, "
+                    f"for \"{b['topic']}\", booked under {b['name']} <{b['email']}>. Shall I book it?")
+            out = say(text, ["Yes, book it", "No, cancel"], booking=b)
+            out["history"] = [{"role": "user", "content": state["question"]}, {"role": "assistant", "content": text}]
+            return out
+        b["stage"] = "choosing"
+        return say("Which of these times works for you?", [x["label"] for x in slots], booking=b)
 
     async def book_confirm(state: State) -> dict:
         # Pauses the graph. Nothing runs before interrupt(), so the resume replay is side-effect free.
-        reply = interrupt({"type": "confirm", "booking": state["booking"].get("chosen")})
+        b = state["booking"]
+        reply = interrupt({"type": "confirm", "booking": b.get("chosen") or b.get("start")})
         return {"confirmed": bool(bk.YES.match(str(reply))), "question": str(reply)}
 
     async def book_create(state: State) -> dict:
         write = get_stream_writer()
         b = state["booking"]
         if not state.get("confirmed"):
-            text = ("I didn't get a clear yes, so I haven't booked anything. "
+            text = ("I didn't get a clear yes, so I haven't changed anything. "
                     "Say 'book a call' whenever you want to start again.")
             write({"type": "delta", "text": text})
             return {"booking": {}, "answer": text, "choices": []}
+        extending = b.get("mode") == "extend"
         try:
-            res = await calendar.create(b["name"], b["email"], b["topic"], b["chosen"]["start"])
+            if extending:
+                res = await calendar.extend(b["email"], b["start"], b["n"])
+            else:
+                res = await calendar.create(b["name"], b["email"], b["topic"], b["chosen"]["start"], b.get("n", 1))
         except Exception as e:  # noqa: BLE001
             log.error("booking_failed", error=str(e)[:200])
             res = {"status": "failed"}
-        label = b["chosen"]["label"]
+        status, label, remaining = res["status"], res.get("label", ""), res.get("remaining", 0)
+        n = res.get("slots", b.get("n", 1))
         text = {
-            "created": f"Booked! Duc-Anh has your call on {label}. He'll follow up at {b['email']}.",
+            "created": f"Booked! Duc-Anh has your {minutes_text(n)} call on {label}. He'll follow up at {b['email']}.",
+            "extended": f"Done, your call is now {30 * n} minutes: {label}.",
             "already_created": f"That call is already booked for {label}. No duplicate was created.",
-            "slot_taken": "Sorry, that slot was just taken. Say 'book a call' to see fresh times.",
-            "limit": "You already have an upcoming call with Duc-Anh, so I can't add another.",
+            "already_extended": f"Your call is already that long: {label}.",
+            "slot_taken": ("Sorry, the time right after your call was just taken, so I couldn't extend it."
+                           if extending else "Sorry, that time was just taken. Say 'book a call' to see fresh times."),
+            "limit": ("You can hold up to 3 half-hour slots with Duc-Anh in total, and you have "
+                      f"{remaining} left."),
             "daily_cap": f"Today's booking limit is reached. Please email {settings.contact_email}.",
-        }.get(res["status"], f"I couldn't complete the booking. Please email {settings.contact_email}.")
-        log.info("booking_result", status=res["status"])
+        }.get(status, f"I couldn't complete that. Please email {settings.contact_email}.")
+        choices: list[str] = []
+        out: dict = {"booking": {}, "choices": choices}
+        if status in ("created", "extended", "already_created", "already_extended"):
+            start = b["start"] if extending else b["chosen"]["start"]
+            out["last_booking"] = {"name": b["name"], "email": b["email"], "topic": b["topic"],
+                                   "start": start, "slots": n, "label": label}
+            if status in ("created", "extended") and remaining > 0:
+                text += f" You can still add {30 * remaining} more minutes in total."
+                choices.extend(after_booking_chips(n, remaining))
+        log.info("booking_result", status=status, extending=extending)
         write({"type": "delta", "text": text})
-        return {"booking": {}, "answer": text, "choices": []}
+        if choices:
+            write({"type": "choices", "options": choices})
+        return {**out, "answer": text}
 
     return {"book_collect": book_collect, "book_confirm": book_confirm, "book_create": book_create}
 

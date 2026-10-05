@@ -28,6 +28,8 @@ class BookingFields(BaseModel):
     email: str | None = None
     topic: str | None = None
     slot_choice: int | None = None  # 1-based index into the slots that were shown
+    minutes: int | None = None  # length asked for a new meeting: 30, 60 or 90
+    extend_to_minutes: int | None = None  # 60 or 90 when they ask to lengthen an existing booked meeting
     cancel: bool | None = False  # models sometimes emit null
 
 
@@ -76,12 +78,23 @@ class Calendar:
     async def free_slots(self) -> list[dict]:
         return await self._call("get_free_slots", {})  # type: ignore[return-value]
 
-    async def create(self, name: str, email: str, topic: str, start: str) -> dict:
+    async def allowance(self, email: str) -> dict:
+        return await self._call("get_allowance", {"email": email})  # type: ignore[return-value]
+
+    async def create(self, name: str, email: str, topic: str, start: str, slots: int = 1) -> dict:
         if await self._today("bookings") >= MAX_BOOKINGS_PER_DAY:
             return {"status": "daily_cap"}
         res = await self._call("create_booking", {
-            "name": name, "email": email, "topic": topic, "start": start})
+            "name": name, "email": email, "topic": topic, "start": start, "slots": slots})
         await self._record("bookings", "booking", res["status"])  # type: ignore[index]
+        return res  # type: ignore[return-value]
+
+    async def extension_limit(self, email: str, start: str) -> dict:
+        return await self._call("extension_limit", {"email": email, "start": start})  # type: ignore[return-value]
+
+    async def extend(self, email: str, start: str, total_slots: int) -> dict:
+        res = await self._call("extend_booking", {"email": email, "start": start, "total_slots": total_slots})
+        await self._record("bookings", "extend", res["status"])  # type: ignore[index]
         return res  # type: ignore[return-value]
 
     async def send_message(self, email: str, message: str, name: str = "") -> dict:

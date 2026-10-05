@@ -35,7 +35,8 @@ Booking and message branches collect details, propose, **`interrupt()` until the
 | Orchestration | LangGraph: routing, **research mode** (plan, parallel `Send` fan-out, reflect loop), human-confirmation `interrupt()`, structured outputs with a strong-model retry | 24 unit tests, `docs/experiment.md` |
 | Multi-step reasoning | complex questions are split, searched in parallel, checked for gaps and re-searched; each step streams to the chat | evidence recall +0.05 to +0.125 over plain RAG across two runs (second run's 95% CI just touches zero) |
 | Tool use / MCP | FastMCP server over stdio (calendar + send-mail tools), discovered via `langchain-mcp-adapters` | live booking and live message tested |
-| Booking and messages | confirm-before-act, deterministic event id, 409 reconciliation, one booking per email, durable daily caps, no auto-retry on send | 10 tests incl. timeout-after-insert |
+| Booking and messages | confirm-before-act, deterministic event id, 409 reconciliation, **3 half-hour slots per visitor as separate calls or one longer meeting, extend afterwards**, Wed/Fri block, durable daily caps, no auto-retry on send | 35 booking tests incl. real-chat replays; INC-008 |
+| Voice input | push-to-talk, recorded in the browser, transcribed by Gemini in the EU through our server; never stored or traced; 20-clip accuracy study | WER 11.5%, [docs/voice.md](docs/voice.md) |
 | Retrieval | separate gRPC service, Vertex embeddings + BM25, deadline + in-process fallback | 4 gRPC tests |
 | Streaming | WebSocket `delta` / `retract` / `step` / `choices` / `done`; reconnect resends the same turn id (replayed, never re-run) | |
 | Routing and failure | tiered router, circuit breaker, TTFT timeout, 429 retry + cooldown, 3 providers on 2 vendors, retrieval-only degraded mode, truncation guard | INC-001, 002, 004 |
@@ -55,6 +56,11 @@ Booking and message branches collect details, propose, **`interrupt()` until the
 - **Negative result:** claim verification gave no benefit and costs about 2 s and 68% more per answer, so it is off.
 - **Research mode:** helps retrieval on average but not answer quality (unmeasured), costs more, and cannot fix
   vocabulary gaps (e.g. "private code"). It runs only for questions flagged complex.
+- **Occasional related-fact answers:** asked what he did at an organisation the site doesn't mention ("at Google"), it
+  sometimes offers a related fact (a competition that company hosted) instead of saying it doesn't know. A prompt rule
+  cut this to roughly one answer in three; it is not eliminated.
+- **Voice:** push-to-talk with about 2 s delay, weaker in German and on product names; measured on synthetic speech only
+  ([docs/voice.md](docs/voice.md)).
 - **Free-tier limits shape the design:** the judge has 200k tokens/day (INC-005).
 - Booking availability is my assumption (weekdays 10:00-17:00 Berlin, 24 h notice): edit `calendar_mcp.py`.
 - Groq is a US vendor used only as a last-resort fallback and for judging; the privacy page says so.

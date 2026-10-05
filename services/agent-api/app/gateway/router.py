@@ -15,6 +15,7 @@ import google.auth.transport.requests
 import httpx
 import structlog
 from langfuse.openai import AsyncOpenAI  # drop-in client that records generations in Langfuse
+from openai import AsyncOpenAI as PlainOpenAI  # no Langfuse wrapper: never uploads request media
 from openai import RateLimitError
 
 from ..config import settings
@@ -91,14 +92,14 @@ class Provider:
     throttled_until: float = 0.0  # monotonic time until which a recent 429 makes us skip this provider
     token_headroom: int = 0  # reasoning models spend max_tokens on thinking; add room
 
-    async def client(self) -> AsyncOpenAI:
+    async def client(self, trace: bool = True) -> AsyncOpenAI:
         raise NotImplementedError
 
 
 class VertexProvider(Provider):
     _creds = None
 
-    async def client(self) -> AsyncOpenAI:
+    async def client(self, trace: bool = True) -> AsyncOpenAI:
         if self._creds is None:
             self._creds, _ = google.auth.default(
                 scopes=["https://www.googleapis.com/auth/cloud-platform"]
@@ -113,7 +114,8 @@ class VertexProvider(Provider):
             f"https://{host}/v1/projects/{settings.gcp_project}"
             f"/locations/{loc}/endpoints/openapi"
         )
-        return AsyncOpenAI(base_url=base, api_key=self._creds.token, max_retries=0)
+        factory = AsyncOpenAI if trace else PlainOpenAI
+        return factory(base_url=base, api_key=self._creds.token, max_retries=0)
 
     async def token(self) -> str:
         await self.client()
@@ -125,7 +127,7 @@ class OpenAICompatProvider(Provider):
         super().__init__(name, models)
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key, max_retries=0)
 
-    async def client(self) -> AsyncOpenAI:
+    async def client(self, trace: bool = True) -> AsyncOpenAI:
         return self._client
 
 
@@ -154,18 +156,24 @@ class Router:
         log.info("llm_call", **rec.__dict__)
 
     async def stream(
-        self, tier: str, messages: list[dict], records: list[CallRecord], **kw
+        self, tier: str, messages: list[dict], records: list[CallRecord],
+        only: tuple[str, ...] | None = None, trace: bool = True, **kw
     ) -> AsyncIterator[dict]:
-        """Yield {"type": "delta"|"retract", ...}. Raise ProviderError if all providers fail."""
+        """Yield {"type": "delta"|"retract", ...}. Raise ProviderError if all providers fail.
+
+        only: restrict to these provider names (e.g. audio-capable ones); trace=False uses an
+        untraced client so request media (voice) is never uploaded to the tracing backend.
+        """
         failed_from = None
-        for i, p in enumerate(self.providers):
+        providers = [p for p in self.providers if only is None or p.name in only]
+        for i, p in enumerate(providers):
             if not p.breaker.available():
                 failed_from = failed_from or p.name
                 continue
             # Load shedding: after a 429, skip this provider for a short cooldown instead of
             # making every request wait out its own retry. The last provider is always tried.
             throttled = time.monotonic() < p.throttled_until
-            if throttled and i < len(self.providers) - 1:
+            if throttled and i < len(providers) - 1:
                 failed_from = failed_from or p.name
                 continue
             # A 429 before any output gets one short retry; anything else moves on.
@@ -181,7 +189,7 @@ class Router:
                             "injected 429 (fault-injection exercise)",
                             response=httpx.Response(429, request=httpx.Request("POST", "http://injected")),
                             body=None)
-                    client = await p.client()
+                    client = await (p.client() if trace else p.client(trace=False))
                     stream = await asyncio.wait_for(
                         client.chat.completions.create(
                             name=f"{p.name}:{tier}", model=rec.model, messages=messages,
@@ -236,10 +244,11 @@ class Router:
         raise ProviderError("all providers failed")
 
     async def complete(
-        self, tier: str, messages: list[dict], records: list[CallRecord], **kw
+        self, tier: str, messages: list[dict], records: list[CallRecord],
+        only: tuple[str, ...] | None = None, trace: bool = True, **kw
     ) -> str:
         out: list[str] = []
-        async for ev in self.stream(tier, messages, records, **kw):
+        async for ev in self.stream(tier, messages, records, only=only, trace=trace, **kw):
             if ev["type"] == "retract":
                 out.clear()
             else:

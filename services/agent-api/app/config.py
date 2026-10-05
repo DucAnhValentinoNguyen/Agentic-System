@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     breaker_open_s: float = 60.0
     max_turns_per_session: int = 30
     max_message_chars: int = 1000
+    # Voice input (push-to-talk): recordings are transcribed in memory and never stored or logged.
+    max_audio_seconds: int = 30
+    max_audio_b64_chars: int = 1_400_000
+    audio_per_minute: int = 6   # per IP
+    daily_audio_clips: int = 500
     rate_per_minute: int = 12
     daily_budget_usd: float = 2.0
     fault_inject: str = ""  # e.g. "vertex_429" — fault-injection exercises only

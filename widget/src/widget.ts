@@ -6,6 +6,7 @@ type ServerEvent =
   | { type: "retract"; turn_id: string }
   | { type: "node"; node: string; turn_id: string }
   | { type: "step"; text: string; turn_id: string }
+  | { type: "transcript"; text: string; turn_id: string }
   | { type: "done"; turn_id: string; trace_id?: string; text: string; citations: Citation[]; degraded: boolean; choices?: string[]; links?: { label: string; url: string }[] }
   | { type: "error"; code: string; text: string; turn_id?: string };
 
@@ -81,6 +82,15 @@ const STYLE = `
 @media (prefers-reduced-motion:no-preference){
 .fab:not(.seen){animation:pulse 2.4s ease-out 3}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(26,26,26,.45),0 4px 16px rgba(0,0,0,.25)}70%{box-shadow:0 0 0 14px rgba(26,26,26,0),0 4px 16px rgba(0,0,0,.25)}100%{box-shadow:0 0 0 0 rgba(26,26,26,0),0 4px 16px rgba(0,0,0,.25)}}}
+.mic{flex-shrink:0;width:44px;min-height:44px;padding:0;border:1px solid #c9c9c9;border-radius:10px;background:#fff;color:#1a1a1a;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.mic:hover{background:#f1f1f1}
+.mic[hidden]{display:none}
+.mic.rec{background:#e5484d;border-color:#e5484d;color:#fff}
+.mic:disabled{opacity:.5;cursor:default}
+.voice-status{flex-shrink:0;padding:0 14px 6px;font-size:13px;color:#b42318}
+.voice-status[hidden]{display:none}
+@media (prefers-reduced-motion:no-preference){.mic.rec{animation:recpulse 1.4s ease-out infinite}
+@keyframes recpulse{0%{box-shadow:0 0 0 0 rgba(229,72,77,.5)}70%{box-shadow:0 0 0 10px rgba(229,72,77,0)}100%{box-shadow:0 0 0 0 rgba(229,72,77,0)}}}
 .steps{margin-bottom:4px}
 .step{font-size:12px;color:#777;line-height:1.35}
 form{flex-shrink:0;display:flex;gap:8px;padding:10px;border-top:1px solid #e6e6e6}
@@ -112,8 +122,9 @@ function mount(): void {
     <div class="rz rz-n" data-edge="n"></div><div class="rz rz-s" data-edge="s"></div><div class="rz rz-e" data-edge="e"></div><div class="rz rz-w" data-edge="w"></div><div class="rz rz-ne" data-edge="ne"></div><div class="rz rz-sw" data-edge="sw"></div><div class="rz rz-se" data-edge="se"></div>
     <div class="head">Duc-Anh's twin<button class="expand" type="button" aria-label="Expand chat" title="Expand chat">⛶</button><button class="close" type="button" aria-label="Close chat">×</button><button class="mute" type="button" aria-label="Mute notification sound" title="Mute notification sound"></button><small>Answers come from this site, with links to the source section.</small><span class="connection" role="status"></span></div>
     <div class="log" aria-live="polite"></div>
-    <div class="note">An AI assistant. Messages are logged to improve it; don't share private data.</div>
-    <form><input maxlength="1000" placeholder="Ask a question" aria-label="Your question"><button class="send">Send</button></form>
+    <div class="note">An AI assistant. Messages are logged to improve it; don't share private data. Voice is transcribed on our server and not stored.</div>
+    <div class="voice-status" role="status" aria-live="polite" hidden></div>
+    <form><button class="mic" type="button" aria-pressed="false" aria-label="Speak your question" title="Speak your question (up to 30 seconds). The recording is transcribed on our server and not stored."><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15Zm6-3.5a1 1 0 1 0-2 0 4 4 0 0 1-8 0 1 1 0 1 0-2 0 6 6 0 0 0 5 5.91V20H9.5a1 1 0 1 0 0 2h5a1 1 0 1 0 0-2H13v-2.59A6 6 0 0 0 18 11.5Z"/></svg></button><input maxlength="1000" placeholder="Ask a question" aria-label="Your question"><button class="send">Send</button></form>
   </div>`;
   document.body.appendChild(host);
 
@@ -123,6 +134,8 @@ function mount(): void {
   const form = root.querySelector("form") as HTMLFormElement;
   const input = root.querySelector("input") as HTMLInputElement;
   const send = root.querySelector(".send") as HTMLButtonElement;
+  const mic = root.querySelector(".mic") as HTMLButtonElement;
+  const voiceStatus = root.querySelector(".voice-status") as HTMLDivElement;
   const connection = root.querySelector(".connection") as HTMLSpanElement;
   const sid = sessionId();
 
@@ -138,6 +151,8 @@ function mount(): void {
     body: HTMLSpanElement;
     steps: HTMLDivElement;
     raw: string;
+    audio?: string; // the recording (base64 WAV) until its transcript arrives, so a reconnect can resend it
+    userEl?: HTMLDivElement; // the visitor's bubble, filled in with the transcript
   } | null = null;
 
   const add = (cls: string, text = ""): HTMLDivElement => {
@@ -161,6 +176,7 @@ function mount(): void {
 
   const busy = (b: boolean): void => {
     send.disabled = b;
+    mic.disabled = b;
   };
 
   const goTo = (c: Citation): void => {
@@ -278,7 +294,13 @@ function mount(): void {
       logEl.scrollTop = logEl.scrollHeight;
     } else if (ev.type === "done") {
       finish(ev.text, ev.citations, ev.choices, ev.links, ev.trace_id);
+    } else if (ev.type === "transcript") {
+      if (pending.userEl) pending.userEl.textContent = ev.text;
+      pending.text = ev.text;
+      pending.audio = undefined; // from here a reconnect resends the text, never the recording again
+      logEl.scrollTop = logEl.scrollHeight;
     } else if (ev.type === "error") {
+      if (pending.audio) pending.userEl?.remove(); // the recording was not understood: drop the empty bubble
       pending.el.classList.add("err");
       pending.body.textContent = ev.text;
       pending = null;
@@ -297,7 +319,9 @@ function mount(): void {
       // after completion, so a reconnect cannot duplicate it.
       if (pending) {
         pending.raw = "";
-        ws!.send(JSON.stringify({ session_id: sid, turn_id: pending.turnId, text: pending.text }));
+        ws!.send(JSON.stringify(pending.audio
+          ? { type: "audio", session_id: sid, turn_id: pending.turnId, format: "wav", data: pending.audio }
+          : { session_id: sid, turn_id: pending.turnId, text: pending.text }));
       }
     };
     ws.onmessage = (m) => onEvent(JSON.parse(m.data) as ServerEvent);
@@ -328,6 +352,148 @@ function mount(): void {
       connect();
     }
   };
+
+  // --- Voice input: push-to-talk. Record, convert to 16 kHz mono WAV, send over the same WebSocket. ---
+  const MAX_SECONDS = 30;
+  const MIN_SECONDS = 0.4;
+  const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  const canRecord = Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined" && Boolean(AudioCtx);
+  mic.hidden = !canRecord;
+
+  let recorder: MediaRecorder | null = null;
+  let stream: MediaStream | null = null;
+  let chunks: Blob[] = [];
+  let recStarted = 0;
+  let timer = 0;
+  let discard = false;
+
+  const status = (text: string): void => {
+    voiceStatus.textContent = text;
+    voiceStatus.hidden = !text;
+  };
+  const releaseMic = (): void => {
+    window.clearInterval(timer);
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null;
+    recorder = null;
+    mic.classList.remove("rec");
+    mic.setAttribute("aria-pressed", "false");
+    mic.setAttribute("aria-label", "Speak your question");
+  };
+
+  // Decode whatever the browser recorded (webm/opus, mp4/aac) and resample to 16 kHz mono 16-bit PCM WAV.
+  const toWav = async (blob: Blob): Promise<string> => {
+    const ctx = new AudioCtx();
+    const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+    void ctx.close();
+    const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * 16000)), 16000);
+    const src = off.createBufferSource();
+    src.buffer = decoded;
+    src.connect(off.destination);
+    src.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    const out = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+    const str = (o: number, s: string): void => [...s].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+    str(0, "RIFF");
+    out.setUint32(4, 36 + pcm.length * 2, true);
+    str(8, "WAVEfmt ");
+    out.setUint32(16, 16, true);
+    out.setUint16(20, 1, true); // PCM
+    out.setUint16(22, 1, true); // mono
+    out.setUint32(24, 16000, true);
+    out.setUint32(28, 32000, true);
+    out.setUint16(32, 2, true);
+    out.setUint16(34, 16, true);
+    str(36, "data");
+    out.setUint32(40, pcm.length * 2, true);
+    pcm.forEach((v, i) => out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 0x7fff, true));
+    const bytes = new Uint8Array(out.buffer);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+
+  const askVoice = (audio: string): void => {
+    if (pending) return;
+    const userEl = add("user", "…");
+    pending = { turnId: crypto.randomUUID(), text: "", audio, userEl, ...addBot(), raw: "" };
+    busy(true);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "audio", session_id: sid, turn_id: pending.turnId, format: "wav", data: audio }));
+    } else if (!ws) {
+      connect();
+    }
+  };
+
+  const problem = (text: string): void => {
+    const el = add("bot", text);
+    el.classList.add("err");
+  };
+
+  const startRecording = async (): Promise<void> => {
+    if (pending || recorder) return;
+    status("Waiting for microphone permission…");
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch {
+      status("");
+      problem("I can't use the microphone. Allow it for this site in your browser's settings, or type your question instead.");
+      return;
+    }
+    chunks = [];
+    discard = false;
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      const seconds = (Date.now() - recStarted) / 1000;
+      const mime = recorder?.mimeType || chunks[0]?.type || "audio/webm";
+      releaseMic();
+      status("");
+      if (discard) return;
+      if (seconds < MIN_SECONDS || !chunks.length) {
+        problem("I didn't catch anything. Tap the microphone, speak, then tap it again.");
+        return;
+      }
+      status("Transcribing…");
+      try {
+        askVoice(await toWav(new Blob(chunks, { type: mime })));
+      } catch {
+        problem("I couldn't process that recording. Please try again or type your question.");
+      } finally {
+        status("");
+      }
+    };
+    recStarted = Date.now();
+    recorder.start();
+    mic.classList.add("rec");
+    mic.setAttribute("aria-pressed", "true");
+    mic.setAttribute("aria-label", "Stop recording and send");
+    const tick = (): void => {
+      const s = Math.floor((Date.now() - recStarted) / 1000);
+      status(`Recording… ${s}s. Tap the microphone to send.`);
+      if (s >= MAX_SECONDS) recorder?.stop();
+    };
+    tick();
+    timer = window.setInterval(tick, 250);
+  };
+
+  const cancelRecording = (): void => {
+    if (recorder && recorder.state !== "inactive") {
+      discard = true;
+      recorder.stop();
+    } else {
+      releaseMic();
+      status("");
+    }
+  };
+
+  mic.onclick = () => {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    else void startRecording();
+  };
+  panel.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && recorder) cancelRecording();
+  });
 
   // --- Announce arrival: pulse + dot (always), and a soft chime (once per visit, mutable). ---
   const store = {
@@ -608,6 +774,7 @@ function mount(): void {
     fab.classList.add("seen");
     store.set("twin-opened", "1", sessionStorage);
     if (!open) {
+      cancelRecording();
       input.blur();
       layout();
       fab.focus({ preventScroll: true });
