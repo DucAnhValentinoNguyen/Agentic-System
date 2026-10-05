@@ -4,6 +4,7 @@ States: collecting -> choosing -> proposed -> (confirmed -> created | failed) | 
 Nothing is created without an explicit confirmation turn.
 """
 
+import asyncio
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import structlog
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
 from pydantic import BaseModel
 
 log = structlog.get_logger()
@@ -53,6 +55,8 @@ class Calendar:
             "command": sys.executable, "args": ["-m", "app.calendar_mcp"],
             "transport": "stdio", "env": env,
         }})
+        self._queue: asyncio.Queue = asyncio.Queue()  # calls waiting for the single long-lived MCP session
+        self._task: asyncio.Task | None = None
         self.mem = {"bookings": 0, "messages": 0}  # per-process fallback when the store is off
         self.sent_hashes: set[str] = set()  # in-process dedupe: a retry never sends twice
         self.enabled = "GOOGLE_CALENDAR_TOKEN" in env
@@ -69,11 +73,46 @@ class Calendar:
         if self.store:
             await self.store.audit(kind, status)
 
+    async def _worker(self) -> None:
+        """Owns ONE MCP subprocess for the life of the server. Starting a fresh one per call cost about a second
+        each time (process start, imports, Google credentials), which made every booking step slow."""
+        failures = 0
+        while True:
+            try:
+                async with self.client.session("calendar") as session:
+                    tools = {t.name: t for t in await load_mcp_tools(session)}
+                    while True:
+                        name, args, fut = await self._queue.get()
+                        try:
+                            out = await tools[name].ainvoke(args)
+                            text = out if isinstance(out, str) else "".join(b.get("text", "") for b in out)
+                            if not fut.done():
+                                fut.set_result(json.loads(text))
+                            failures = 0
+                        except Exception as e:
+                            if not fut.done():
+                                fut.set_exception(e)
+                            failures += 1
+                            if failures >= 2:  # two failures in a row look like a dead session: start a new one
+                                raise
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.warning("mcp_session_restart", error=str(e)[:200])
+                failures = 0
+                await asyncio.sleep(0.5)
+
     async def _call(self, name: str, args: dict) -> dict | list:
-        tools = {t.name: t for t in await self.client.get_tools()}
-        out = await tools[name].ainvoke(args)
-        text = out if isinstance(out, str) else "".join(b.get("text", "") for b in out)
-        return json.loads(text)
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._worker())
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        await self._queue.put((name, args, fut))
+        return await asyncio.wait_for(fut, 30)
+
+    async def close(self) -> None:
+        if self._task:
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
 
     async def free_slots(self) -> list[dict]:
         return await self._call("get_free_slots", {})  # type: ignore[return-value]

@@ -38,8 +38,10 @@ resource "google_logging_metric" "turn_latency" {
   }
   bucket_options {
     exponential_buckets {
-      num_finite_buckets = 20
-      growth_factor      = 1.5
+      # 1.2x steps (boundaries near 6.6, 7.9, 9.5 s). With 1.5x steps anything from 5.8 to 8.7 s was reported as 8.7 s
+      # and tripped the 8 s alert (INC-010).
+      num_finite_buckets = 40
+      growth_factor      = 1.2
       scale              = 100
     }
   }
