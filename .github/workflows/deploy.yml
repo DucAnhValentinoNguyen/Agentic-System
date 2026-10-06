@@ -1,6 +1,6 @@
-# Continuous deployment: every push to main that passes the tests is built, rolled out to Cloud Run, smoke-tested
-# and checked by the adversarial suite. No stored key: GitHub's OIDC token is exchanged for a short-lived credential
-# (see infra/terraform/cd.tf). If any step fails the job stops; a failed rollout leaves the old revision serving.
+# Continuous deployment: every push to main that passes the tests is built and started as a new Cloud Run revision with
+# no traffic, smoke-tested and checked by the adversarial suite on its private tag URL; only then do users move to it.
+# No stored key: GitHub's OIDC token is exchanged for a short-lived credential (see infra/terraform/cd.tf). If any step fails the job stops; a failed rollout leaves the old revision serving.
 name: deploy
 on:
   push:
@@ -41,17 +41,23 @@ jobs:
         run: |
           docker build -t "$IMAGE:${GITHUB_SHA::12}" .
           docker push "$IMAGE:${GITHUB_SHA::12}"
-      - name: Roll out (retrieval first, then the API)
+      - name: Roll out the retrieval service
+        run: gcloud run services update twin-retrieval --region "$REGION" --image "$IMAGE:${GITHUB_SHA::12}" --quiet
+      - name: Start the new API revision with NO traffic (tagged "candidate")
         run: |
-          for svc in twin-retrieval twin-agent-api; do
-            gcloud run services update "$svc" --region "$REGION" --image "$IMAGE:${GITHUB_SHA::12}" --quiet
-          done
-      - name: Smoke test
-        run: |
+          gcloud run services update twin-agent-api --region "$REGION" --image "$IMAGE:${GITHUB_SHA::12}" \
+            --no-traffic --tag candidate --quiet
           url=$(gcloud run services describe twin-agent-api --region "$REGION" --format 'value(status.url)')
-          curl -fsS --retry 5 --retry-delay 5 "$url/health"
-          echo "url=$url" >> "$GITHUB_ENV"
+          candidate="${url/https:\/\//https://candidate---}"
+          echo "candidate=$candidate" >> "$GITHUB_ENV"
+      - name: Smoke test the candidate
+        run: curl -fsS --retry 5 --retry-delay 5 "$candidate/health"
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
-      - name: Adversarial suite against the new revision
-        run: uv run python evals/run_security.py --url "${url/https:/wss:}/ws/chat"
+      - name: Adversarial suite against the candidate (users are still on the old revision)
+        run: uv run python evals/run_security.py --url "${candidate/https:/wss:}/ws/chat"
+      - name: Shift all traffic to the new revision (only reached if every check passed)
+        run: gcloud run services update-traffic twin-agent-api --region "$REGION" --to-latest --quiet
+      - name: Remove the candidate tag
+        if: always()
+        run: gcloud run services update-traffic twin-agent-api --region "$REGION" --remove-tags candidate --quiet
