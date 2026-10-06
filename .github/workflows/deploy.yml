@@ -1,0 +1,57 @@
+# Continuous deployment: every push to main that passes the tests is built, rolled out to Cloud Run, smoke-tested
+# and checked by the adversarial suite. No stored key: GitHub's OIDC token is exchanged for a short-lived credential
+# (see infra/terraform/cd.tf). If any step fails the job stops; a failed rollout leaves the old revision serving.
+name: deploy
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md", "evals/**"]
+  workflow_dispatch:
+
+concurrency: { group: deploy, cancel-in-progress: false }
+
+env:
+  PROJECT: agentsystems-510414
+  REGION: europe-west3
+  IMAGE: europe-west3-docker.pkg.dev/agentsystems-510414/twin/agent-api
+  PROVIDER: projects/1058744794873/locations/global/workloadIdentityPools/github/providers/github
+  DEPLOYER: twin-deployer@agentsystems-510414.iam.gserviceaccount.com
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions: { contents: read, id-token: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with: { workload_identity_provider: "${{ env.PROVIDER }}", service_account: "${{ env.DEPLOYER }}" }
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Build and push (tag = commit)
+        run: |
+          docker build -t "$IMAGE:${GITHUB_SHA::12}" .
+          docker push "$IMAGE:${GITHUB_SHA::12}"
+      - name: Roll out (retrieval first, then the API)
+        run: |
+          for svc in twin-retrieval twin-agent-api; do
+            gcloud run services update "$svc" --region "$REGION" --image "$IMAGE:${GITHUB_SHA::12}" --quiet
+          done
+      - name: Smoke test
+        run: |
+          url=$(gcloud run services describe twin-agent-api --region "$REGION" --format 'value(status.url)')
+          curl -fsS --retry 5 --retry-delay 5 "$url/health"
+          echo "url=$url" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - name: Adversarial suite against the new revision
+        run: uv run python evals/run_security.py --url "${url/https:/wss:}/ws/chat"

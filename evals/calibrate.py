@@ -47,7 +47,7 @@ def export() -> None:
 
 
 def score() -> None:
-    with open(RES / "audit.csv") as f:
+    with open(RES / "audit.csv", encoding="utf-8") as f:
         rows = [r for r in csv.DictReader(f) if r["human_unsupported"].strip() != ""]
     j = [int(int(r["judge_unsupported"]) > 0) for r in rows]
     h = [int(int(r["human_unsupported"]) > 0) for r in rows]
