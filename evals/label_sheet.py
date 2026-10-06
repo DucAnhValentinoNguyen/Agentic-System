@@ -18,7 +18,7 @@ COLS = [("id", 14), ("variant", 8), ("question", 34), ("answer", 70), ("cited_so
 
 
 def make() -> None:
-    rows = list(csv.DictReader(open(RES / "audit.csv", encoding="utf-8")))
+    rows = list(csv.DictReader((RES / "audit.csv").read_text(encoding="utf-8").splitlines(keepends=True)))
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "audit"
@@ -42,7 +42,7 @@ def make() -> None:
 def merge() -> None:
     ws = openpyxl.load_workbook(SHEET).active
     got = {(str(r[0]), str(r[1])): r[5] for r in ws.iter_rows(min_row=2, values_only=True) if r[5] not in (None, "")}
-    rows = list(csv.DictReader(open(RES / "audit.csv", encoding="utf-8")))
+    rows = list(csv.DictReader((RES / "audit.csv").read_text(encoding="utf-8").splitlines(keepends=True)))
     for r in rows:
         r["human_unsupported"] = str(int(got[(r["id"], r["variant"])])) if (r["id"], r["variant"]) in got else ""
     with open(RES / "audit.csv", "w", newline="", encoding="utf-8") as f:
