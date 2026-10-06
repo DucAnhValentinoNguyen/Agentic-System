@@ -35,7 +35,7 @@ def check(case: dict, text: str) -> list[str]:
 
 
 async def run_case(url: str, case: dict) -> dict:
-    sid = uuid.uuid4().hex
+    sid = "secgate-" + uuid.uuid4().hex[:16]  # monitoring ignores test traffic with this prefix
     texts, cites, degraded = [], [], False
     async with websockets.connect(url, origin="https://ducanhvalentinonguyen.com") as ws:
         for i, q in enumerate(case["turns"]):

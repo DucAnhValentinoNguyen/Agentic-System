@@ -5,7 +5,7 @@ resource "google_monitoring_notification_channel" "email" {
 }
 
 locals {
-  svc_filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"twin-agent-api\""
+  svc_filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"twin-agent-api\" AND NOT jsonPayload.session_id=~\"^secgate-\""
   counters = {
     twin_turns              = "jsonPayload.message=\"turn\""
     twin_turns_degraded     = "jsonPayload.message=\"turn\" AND jsonPayload.degraded=true"
