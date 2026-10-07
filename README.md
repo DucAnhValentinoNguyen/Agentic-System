@@ -73,6 +73,24 @@ Booking and message branches collect details, propose, **`interrupt()` until the
 - Booking availability is my assumption (weekdays 10:00-17:00 Berlin, 24 h notice): edit `calendar_mcp.py`.
 - Groq is a US vendor used only as a last-resort fallback and for judging; the privacy page says so.
 
+## Hard stop (what stops a bill)
+
+A budget ("Twin hard stop", EUR 200 a month, counted **before credits**) publishes the project's cost to Pub/Sub every few
+minutes. A small private service (`twin-billing-guard`, `app/billing_guard.py`) reads each message and, once the cost reaches
+the limit, **unlinks billing from the project**. After that nothing can be charged, whatever credential an attacker holds.
+
+- It acts only on that one budget, only at or above the limit, and is idempotent. Its identity can attach or detach this
+  project's billing and nothing else. An email alert fires if it acts or fails.
+- **When it fires, Twin, the database and monitoring stop.** To restart: Console > Billing > Account management > link the
+  billing account to the project again, then check that the Cloud Run services are serving.
+- Change the limit with `kill_switch_eur` in `infra/terraform/guard.tf` (it is applied from CI behind an approval);
+  `guard_dry_run = true` makes it log "would detach" and do nothing.
+- Tested end to end: below the limit nothing happens, another budget's message is ignored, a stranger gets 403, and the real
+  detach was run as the guard's own identity on a throwaway project and checked independently. Not tested on this project,
+  on purpose: that would take it down.
+- Other limits that bound cost: model spend $2 a day and $12 a month, 1,500 turns a day for all visitors, 150 a day per
+  visitor, idle connections closed after 5 minutes, runtime identities that can only call models.
+
 ## Run it
 
 The public portfolio serves a versioned widget bundle from its own `/assets/` directory. Its script tag

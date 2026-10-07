@@ -3,7 +3,7 @@
 # Then nothing can be charged any more, whatever credential an attacker holds. The price is that Twin is down until
 # billing is linked again (see README, "Hard stop"). It starts in dry-run mode: set guard_dry_run = false once verified.
 variable "kill_switch_eur" { default = 200 }
-variable "guard_dry_run" { default = true }
+variable "guard_dry_run" { default = false }            # true logs "would detach" and does nothing
 variable "guard_image_tag" { default = "1db6f788f3b0" } # only for creation; the deploy workflow keeps it current
 
 locals {
