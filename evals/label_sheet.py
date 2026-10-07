@@ -41,15 +41,23 @@ def make() -> None:
 
 def merge() -> None:
     ws = openpyxl.load_workbook(SHEET).active
-    got = {(str(r[0]), str(r[1])): r[5] for r in ws.iter_rows(min_row=2, values_only=True) if r[5] not in (None, "")}
     rows = list(csv.DictReader((RES / "audit.csv").read_text(encoding="utf-8").splitlines(keepends=True)))
-    for r in rows:
-        r["human_unsupported"] = str(int(got[(r["id"], r["variant"])])) if (r["id"], r["variant"]) in got else ""
+    labels: dict[int, str] = {}
+    for i, r in enumerate(ws.iter_rows(min_row=2, values_only=True)):  # row order is the key, so a mistyped id cannot break it
+        v = r[5]
+        if v in (None, ""):
+            continue
+        try:
+            labels[i] = str(int(float(v)))
+        except (TypeError, ValueError):
+            print(f"skipped row {i + 2} ({rows[i]['id']}): {v!r} is not a number")
+    for i, r in enumerate(rows):
+        r["human_unsupported"] = labels.get(i, "")
     with open(RES / "audit.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    print("merged", len(got), "labels into audit.csv; now run: uv run python evals/calibrate.py score")
+    print("merged", len(labels), "labels into audit.csv; now run: uv run python evals/calibrate.py score")
 
 
 {"make": make, "merge": merge}[sys.argv[1]]()
