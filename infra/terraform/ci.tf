@@ -38,13 +38,15 @@ resource "google_project_iam_member" "tf_apply" {
 resource "google_service_account_iam_member" "plan_from_main" {
   service_account_id = google_service_account.tf_plan.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/repo:${var.github_repo}:ref:refs/heads/main"
+  # The provider already admits only this repository, so the branch alone is enough to identify the job.
+  member = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.ref/refs/heads/main"
 }
 
 resource "google_service_account_iam_member" "apply_from_production" {
   service_account_id = google_service_account.tf_apply.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/repo:${var.github_repo}:environment:production"
+  # Only a job that runs in the GitHub environment "production" (which needs a reviewer's approval) carries this claim.
+  member = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.environment/production"
 }
 
 output "tf_plan_sa" { value = google_service_account.tf_plan.email }
