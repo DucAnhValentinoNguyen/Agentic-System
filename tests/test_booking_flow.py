@@ -324,3 +324,22 @@ async def test_the_report_reuses_an_email_already_given_in_the_chat(chat):
     await turn("the times shown were wrong", leave={"message": "the times shown were wrong"})
     await turn("Yes, send it")
     assert cal.sent[0] == "ann@example.com" and cal.sent[2] == "issue"
+
+
+async def test_after_a_cancellation_asking_for_the_appointment_says_there_is_none(chat):
+    turn, _ = chat
+    await book_one(turn)
+    await turn("90 min")
+    await turn("Yes, book it")
+    await turn("please cancel it", {"cancel": True})
+    await turn("Yes, cancel it")
+    out = await turn("when is my appointment?")
+    assert "don't have a call booked" in out["answer"] and "booking page" not in out["answer"]
+
+
+def test_the_appointment_question_pattern_does_not_swallow_booking_requests():
+    from app.graph.build import ASK_EXISTING
+    for q in ("when is my appointment?", "What time is my call?", "do I have a call booked?", "did I book a meeting"):
+        assert ASK_EXISTING.search(q), q
+    for q in ("when can I book a call?", "book a call", "How do I schedule a meeting with him?", "when is he free"):
+        assert not ASK_EXISTING.search(q), q

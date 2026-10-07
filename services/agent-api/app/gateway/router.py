@@ -134,7 +134,9 @@ class OpenAICompatProvider(Provider):
 class Router:
     def __init__(self, providers: list[Provider]):
         self.providers = providers
-        self.spent_today_usd = 0.0
+        self.spent_today_usd = 0.0  # this process only; the durable total is shared_* plus pending_usd
+        self.shared_day = self.shared_month = 0.0  # last persisted totals (all instances)
+        self.pending_usd = 0.0  # spent here since the last flush to the shared total
         self._day = time.strftime("%Y-%m-%d")
         self.calls: list[CallRecord] = []  # recent calls, for /v1/status
 
@@ -142,7 +144,21 @@ class Router:
         today = time.strftime("%Y-%m-%d")
         if today != self._day:
             self._day, self.spent_today_usd = today, 0.0
-        return self.spent_today_usd >= settings.daily_budget_usd
+        day_total = max(self.spent_today_usd, self.shared_day + self.pending_usd)
+        return (day_total >= settings.daily_budget_usd
+                or self.shared_month + self.pending_usd >= settings.monthly_budget_usd)
+
+    async def sync_spend(self, store) -> None:
+        """Write what this instance spent since the last call to the shared total, then read the total back.
+
+        The in-memory counter alone reset to zero on every restart or scale-to-zero, so a visitor could outlast it.
+        """
+        pending, self.pending_usd = self.pending_usd, 0.0
+        if pending > 0 and not await store.add_spend(pending):
+            self.pending_usd += pending  # keep it for the next attempt
+        got = await store.get_spend()
+        if got:
+            self.shared_day, self.shared_month = got
 
     def _finish(self, rec: CallRecord, usage, t0: float) -> None:
         if usage:
@@ -151,6 +167,7 @@ class Router:
             pin, pout = PRICES.get(rec.model, PRICES.get(rec.provider, (0, 0)))
             rec.cost_usd = (rec.tokens_in * pin + rec.tokens_out * pout) / 1e6
             self.spent_today_usd += rec.cost_usd
+            self.pending_usd += rec.cost_usd
         rec.latency_ms = (time.monotonic() - t0) * 1000
         self.calls = (self.calls + [rec])[-200:]
         log.info("llm_call", **rec.__dict__)

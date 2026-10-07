@@ -236,7 +236,7 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         stage = b.get("stage")
         q = state["question"].strip()
         labels = {x["label"] for x in b.get("slots") or []}
-        chip = re.fullmatch(r"(30|60|90) min|Extend to (60|90) min|Book another time|Cancel that call", q)
+        chip = re.fullmatch(r"(30|60|90) min|Extend to (60|90) min|Book another time|Cancel that call|Book a call", q)
         if (chip and (stage or state.get("last_booking"))) or (
             stage in ("collecting", "choosing", "length") and (q.isdigit() or "@" in q or q in labels)
         ) or (
@@ -523,6 +523,12 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             return {"answer": text, "choices": choices or [], "confirmed": None, "records": recs,
                     "visitor": who or state.get("visitor") or {}, **extra}
 
+        if ASK_EXISTING.search(qs) and b.get("stage") not in ("collecting", "choosing", "length", "proposed"):
+            if last:
+                return say(f"Your call with Duc-Anh is on {last['label']}, booked under {last['email']}.",
+                           ["Cancel that call", "Book another time"], booking={})
+            return say("I don't have a call booked for you in this chat. I only know about calls that I booked here; "
+                       f"for anything else please email {settings.contact_email}.", ["Book a call"], booking={})
         if not b.get("stage") and not last:
             # A fresh request: point to the booking page first, and offer to do it right here.
             links = ([{"label": "Open the booking page", "url": settings.booking_page_url}]
@@ -796,6 +802,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
     return {"book_collect": book_collect, "book_confirm": book_confirm, "book_create": book_create}
 
 
+ASK_EXISTING = re.compile(
+    r"\b(when|what time)\b.{0,12}\b(is|was|are|did)\b.{0,12}\b(my|the)\b.{0,15}\b(appointment|booking|call|meeting)\b"
+    r"|\b(do i have|did i book|have i booked|did i schedule)\b.{0,30}\b(appointment|booking|call|meeting)\b",
+    re.IGNORECASE)
 REPORT_ISSUE = "Report an issue with this chatbot to Duc-Anh"  # sent by the always-visible button in the widget
 
 

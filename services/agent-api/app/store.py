@@ -3,7 +3,9 @@
 Schema (schema_version 1), see docs/SCHEMA.md:
   turns/{trace_id}   one document per answered turn (question, answer, sources, cost, feedback, judge)
   audit/{auto}       one document per booking or message attempt (kind, status): no PII
-  counters/{date}    durable daily caps (bookings, messages)
+  counters/{date}    durable daily caps (bookings, messages) and the day's model spend (spend_usd)
+  counters/{month}   the month's model spend (spend_usd)
+  ipdays/{day_hash}  turns per visitor and day; the key is a salted daily hash, never the address
 All collections carry expire_at (a Firestore TTL policy deletes them after 30 days).
 """
 
@@ -88,6 +90,55 @@ class Store:
                 {name: firestore.Increment(1), "expire_at": _now() + RETENTION}, merge=True)
         except Exception as e:  # noqa: BLE001
             log.warning("store_failed", op="bump", error=str(e)[:200])
+
+    async def get_spend(self) -> tuple[float, float] | None:
+        """(today's, this month's) model spend in USD as persisted by all instances, or None if unavailable."""
+        if not self.enabled:
+            return None
+        try:
+            now = _now()
+            day = await self.db().collection("counters").document(now.strftime("%Y-%m-%d")).get()
+            month = await self.db().collection("counters").document(now.strftime("%Y-%m")).get()
+            return (float((day.to_dict() or {}).get("spend_usd", 0.0)),
+                    float((month.to_dict() or {}).get("spend_usd", 0.0)))
+        except Exception as e:  # noqa: BLE001
+            log.warning("store_failed", op="get_spend", error=str(e)[:200])
+            return None
+
+    async def add_spend(self, usd: float) -> bool:
+        if not self.enabled:
+            return True
+        try:
+            from google.cloud import firestore
+            now = _now()
+            await self.db().collection("counters").document(now.strftime("%Y-%m-%d")).set(
+                {"spend_usd": firestore.Increment(usd), "expire_at": now + RETENTION}, merge=True)
+            await self.db().collection("counters").document(now.strftime("%Y-%m")).set(
+                {"spend_usd": firestore.Increment(usd), "expire_at": now + 2 * RETENTION}, merge=True)
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.warning("store_failed", op="add_spend", error=str(e)[:200])
+            return False
+
+    async def get_ip_turns(self, key: str) -> int | None:
+        if not self.enabled:
+            return None
+        try:
+            snap = await self.db().collection("ipdays").document(key).get()
+            return int((snap.to_dict() or {}).get("n", 0))
+        except Exception as e:  # noqa: BLE001
+            log.warning("store_failed", op="get_ip_turns", error=str(e)[:200])
+            return None
+
+    async def bump_ip(self, key: str) -> None:
+        if not self.enabled:
+            return
+        try:
+            from google.cloud import firestore
+            await self.db().collection("ipdays").document(key).set(
+                {"n": firestore.Increment(1), "expire_at": _now() + dt.timedelta(days=2)}, merge=True)
+        except Exception as e:  # noqa: BLE001
+            log.warning("store_failed", op="bump_ip", error=str(e)[:200])
 
     async def pending_judgments(self, limit: int) -> list[tuple[str, dict]]:
         q = (self.db().collection("turns").where("judge_pending", "==", True)

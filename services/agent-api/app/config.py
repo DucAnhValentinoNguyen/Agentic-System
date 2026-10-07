@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     daily_audio_clips: int = 500
     rate_per_minute: int = 12
     daily_budget_usd: float = 2.0
+    monthly_budget_usd: float = 12.0  # a second, longer fence for the credits: persisted, shared by all instances
+    daily_turns_per_ip: int = 150  # per network address and day, persisted (the per-chat cap resets with a new chat)
     fault_inject: str = ""  # e.g. "vertex_429" — fault-injection exercises only
 
 

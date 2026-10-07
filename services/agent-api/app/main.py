@@ -77,9 +77,23 @@ async def lifespan(app: FastAPI):
     app.state.turns = defaultdict(int)    # session -> turn count
     app.state.done_turns = {}             # (session, turn_id) -> final event (idempotent replay)
     app.state.audio_day, app.state.audio_clips = time.strftime("%Y-%m-%d"), 0
+    app.state.ip_day = {}                 # salted daily hash of the address -> turns today
+    await router.sync_spend(app.state.store)  # a restart must not reset the day's spend
+
+    async def spend_loop() -> None:
+        while True:
+            await asyncio.sleep(10)
+            try:
+                await router.sync_spend(app.state.store)
+            except Exception as e:  # noqa: BLE001
+                log.warning("spend_sync_failed", error=str(e)[:200])
+
+    spend_task = asyncio.create_task(spend_loop())
     log.info("startup", chunks=len(index.chunks), retrieval="remote" if settings.retrieval_addr else "local",
              providers=[p.name for p in router.providers])
     yield
+    spend_task.cancel()
+    await router.sync_spend(app.state.store)  # do not lose the last seconds of spend on shutdown
 
 
 app = FastAPI(title="Twin agent-api", lifespan=lifespan)
@@ -109,7 +123,8 @@ async def status():
         "fallbacks": sum(1 for c in ok if c.fallback_from),
         "ttft_ms_p50": ttft[len(ttft) // 2] if ttft else None,
         "ttft_ms_p95": ttft[int(len(ttft) * 0.95)] if ttft else None,
-        "spent_today_usd": round(r.spent_today_usd, 5),
+        "spent_today_usd": round(max(r.spent_today_usd, r.shared_day + r.pending_usd), 5),
+        "spent_month_usd": round(r.shared_month + r.pending_usd, 5),
         "breakers": {p.name: p.breaker.failures for p in r.providers},
     }
 
@@ -160,6 +175,25 @@ def rate_limited(ws: WebSocket) -> bool:
     return ip_limited(client_ip(ws), settings.rate_per_minute)
 
 
+async def ip_day_limited(ws: WebSocket) -> bool:
+    """Per-visitor daily cap that survives restarts and new chats. The key is a salted daily hash, not the address."""
+    key = hashlib.sha256(f"{client_ip(ws)}|{time.strftime('%Y-%m-%d')}".encode()).hexdigest()[:16]
+    seen = app.state.ip_day
+    if len(seen) > 5000:
+        seen.clear()
+    n = seen.get(key)
+    if n is None:
+        n = await app.state.store.get_ip_turns(key) or 0
+    if n >= settings.daily_turns_per_ip:
+        seen[key] = n
+        return True
+    seen[key] = n + 1
+    task = asyncio.create_task(app.state.store.bump_ip(key))
+    app.state.tasks.add(task)
+    task.add_done_callback(app.state.tasks.discard)
+    return False
+
+
 async def admit(ws: WebSocket, session_id: str, turn_id: str) -> bool:
     """Gate shared by typed and spoken turns. Sends the refusal itself and returns False if refused."""
     key = (session_id, turn_id)
@@ -170,6 +204,11 @@ async def admit(ws: WebSocket, session_id: str, turn_id: str) -> bool:
     if rate_limited(ws):
         await ws.send_json({"type": "error", "code": "rate_limited", "turn_id": turn_id,
                             "text": "Too many messages. Please wait a minute."})
+        return False
+    if await ip_day_limited(ws):
+        await ws.send_json({"type": "error", "code": "daily_limit", "turn_id": turn_id,
+                            "text": "You have reached today's limit from this connection. Please come back "
+                                    f"tomorrow or email {settings.contact_email}."})
         return False
     if app.state.turns[session_id] >= settings.max_turns_per_session:
         await ws.send_json({"type": "error", "code": "session_limit", "turn_id": turn_id,
