@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     rate_per_minute: int = 12
     daily_budget_usd: float = 2.0
     monthly_budget_usd: float = 12.0  # a second, longer fence for the credits: persisted, shared by all instances
+    session_store: str = "memory"  # "firestore": chat state in Firestore, so any instance can continue any chat
+    history_window: int = 6  # recent messages sent to the model on every step
+    summary_after: int = 4  # messages that have fallen out of the window before they are folded into a summary (evals/context_study.py)
+    rerank: str = "off"  # "llm": retrieve rerank_candidates passages, keep only those that help answer (see docs/experiment.md)
+    rerank_candidates: int = 10  # the retrieval service returns at most 10
+    rerank_keep: int = 5
     daily_turns_per_ip: int = 150  # per network address and day, persisted (the per-chat cap resets with a new chat)
     fault_inject: str = ""  # e.g. "vertex_429" — fault-injection exercises only
 

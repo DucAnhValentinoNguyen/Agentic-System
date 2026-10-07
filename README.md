@@ -47,10 +47,18 @@ Booking and message branches collect details, propose, **`interrupt()` until the
 
 ## Honest status and limits
 
-- **Conversation state** (LangGraph checkpoints, rate limits) is still in memory on one instance: a restart drops
-  in-flight conversations. Daily caps, turn history and feedback are durable in Firestore.
-- **Not built:** a local-GPU (RTX 4090) benchmark,
-  Cloud Trace / OpenTelemetry (Langfuse is the tracing layer), long-term per-visitor memory.
+- **Conversation state** is in Firestore (`app/checkpoint.py`), so a restart or a second instance continues a chat;
+  per-minute rate limits are still per instance. The daily and monthly spend caps and a per-visitor daily cap are
+  shared and survive restarts. Turn history and feedback are durable too.
+- **Infrastructure from CI:** Terraform state is in a versioned bucket; every push plans read-only, and an apply needs a
+  human approval in the `production` environment (`.github/workflows/terraform.yml`). Secret values are set once and
+  never overwritten by Terraform.
+- **Not built:** a local-GPU (RTX 4090) benchmark, Cloud Trace / OpenTelemetry (Langfuse is the tracing layer),
+  memory across chats (a decision, see `docs/experiment.md`).
+- **Reranker:** built and measured (halves irrelevant passages, recall unchanged, +1.5 s), off by default
+  because answer quality is not measured.
+- **History and summaries:** a 6-message window plus a running summary lifted follow-up resolution from 13 of 18 to
+  18 of 18 in a small test (`docs/experiment.md`, Experiment 4).
 - **Judge calibration:** on 47 hand-labelled answers the judge agrees 94% of the time, but kappa is about 0 and both
   of its flags were false alarms, so its absolute rates are not trusted yet (`docs/experiment.md`).
 - **Negative result:** claim verification gave no benefit and costs about 2 s and 68% more per answer, so it is off.

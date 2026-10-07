@@ -268,7 +268,7 @@ class Router:
         async for ev in self.stream(tier, messages, records, only=only, trace=trace, **kw):
             if ev["type"] == "retract":
                 out.clear()
-            else:
+            elif ev["type"] == "delta":  # a "truncated" event carries no text: keep what was produced so far
                 out.append(ev["text"])
         return "".join(out)
 

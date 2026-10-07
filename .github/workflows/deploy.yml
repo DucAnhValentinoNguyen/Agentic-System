@@ -58,6 +58,8 @@ jobs:
         run: uv run python evals/run_security.py --url "${candidate/https:/wss:}/ws/chat"
       - name: Shift all traffic to the new revision (only reached if every check passed)
         run: gcloud run services update-traffic twin-agent-api --region "$REGION" --to-latest --quiet
+      - name: Keep the online judge job on the same image
+        run: gcloud run jobs update twin-online-judge --region "$REGION" --image "$IMAGE:${GITHUB_SHA::12}" --quiet
       - name: Remove the candidate tag
         if: always()
         run: gcloud run services update-traffic twin-agent-api --region "$REGION" --remove-tags candidate --quiet

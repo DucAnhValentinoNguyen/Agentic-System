@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from . import stt
 from .booking import Calendar
+from .checkpoint import FirestoreSaver
 from .config import settings
 from .gateway.router import ProviderError, build_router
 from .graph.build import build_graph, site_topics
@@ -71,8 +72,11 @@ async def lifespan(app: FastAPI):
     app.state.router = router
     app.state.store = Store()
     app.state.tasks = set()  # strong refs to fire-and-forget storage tasks
+    saver = (FirestoreSaver(app.state.store.db())
+             if settings.session_store == "firestore" and app.state.store.enabled else None)
+    app.state.durability = "exit" if saver else "async"  # one Firestore write per turn instead of one per step
     app.state.graph = build_graph(router, retriever, Calendar(app.state.store),
-                                  topics=site_topics([c["title"] for c in index.chunks]))
+                                  topics=site_topics([c["title"] for c in index.chunks]), checkpointer=saver)
     app.state.hits = defaultdict(deque)   # ip -> recent turn timestamps
     app.state.turns = defaultdict(int)    # session -> turn count
     app.state.done_turns = {}             # (session, turn_id) -> final event (idempotent replay)
@@ -90,6 +94,7 @@ async def lifespan(app: FastAPI):
 
     spend_task = asyncio.create_task(spend_loop())
     log.info("startup", chunks=len(index.chunks), retrieval="remote" if settings.retrieval_addr else "local",
+             sessions="firestore" if saver else "memory",
              providers=[p.name for p in router.providers])
     yield
     spend_task.cancel()
@@ -366,7 +371,7 @@ async def _stream_graph(ws: WebSocket, msg: UserMsg, cfg: dict, final: dict) -> 
         graph_input = {"question": msg.text, "records": [], "session_id": msg.session_id,
                        "variant": assign_variant(msg.session_id)}
     async for mode, ev in app.state.graph.astream(
-        graph_input, cfg, stream_mode=["custom", "updates"]
+        graph_input, cfg, stream_mode=["custom", "updates"], durability=app.state.durability
     ):
         if mode == "custom":
             if ev.get("type") == "step":

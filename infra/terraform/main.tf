@@ -223,5 +223,4 @@ resource "google_cloud_run_v2_service_iam_member" "agent_calls_retrieval" {
 }
 
 output "url" { value = google_cloud_run_v2_service.agent.uri }
-output "image" { value = local.image }
 output "retrieval_url" { value = google_cloud_run_v2_service.retrieval.uri }

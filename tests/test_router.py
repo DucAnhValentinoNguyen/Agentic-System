@@ -139,3 +139,22 @@ def test_trim_to_sentence_keeps_whole_sentences_and_citations():
         == "He builds models [4]."
     assert trim_to_sentence("No sentence end here") == "No sentence end here"
     assert trim_to_sentence("One. Two [1, 2]. Thre") == "One. Two [1, 2]."
+
+
+async def test_complete_returns_the_text_so_far_when_the_reply_was_truncated():
+    # Regression: complete() raised KeyError('text') on the "truncated" event, crashing any structured call that hit its cap.
+    a = FakeProvider("a", ["Hello there. Partial sen"])
+    orig = a.client
+
+    async def client():
+        c = await orig()
+        create = c.chat.completions.create
+
+        async def wrapped(**kw):
+            st = await create(**kw)
+            st.truncate = True
+            return st
+        c.chat.completions.create = wrapped
+        return c
+    a.client = client
+    assert await Router([a]).complete("strong", [], []) == "Hello there. Partial sen"

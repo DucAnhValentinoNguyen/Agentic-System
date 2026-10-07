@@ -57,6 +57,10 @@ resource "google_cloud_run_v2_job" "judge" {
   name                = "twin-online-judge"
   location            = var.region
   deletion_protection = false
+  lifecycle {
+    # The deploy workflow keeps the job on the same image as the services; Terraform must not roll it back.
+    ignore_changes = [client, client_version, template[0].template[0].containers[0].image]
+  }
   template {
     template {
       service_account = google_service_account.agent.email

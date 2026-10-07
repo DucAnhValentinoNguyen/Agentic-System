@@ -60,6 +60,8 @@ class State(TypedDict, total=False):
     booking: dict
     last_booking: dict
     session_id: str
+    summary: str  # what the older turns, outside the window, were about
+    summary_upto: int  # how many history messages the summary already covers
     visitor: dict  # name, email, topic given in this chat; survives a cancelled or declined booking
     leave: dict
     messages_sent: int
@@ -226,7 +228,8 @@ def site_topics(titles: list[str], limit: int = 40) -> list[str]:
     return list(seen)[:limit]
 
 
-def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[str] | None = None):
+def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[str] | None = None,
+                checkpointer=None):
     topic_note = ("\nThe site covers these projects and topics. A question about any of them is intent "
                   "\"question\" even if it never mentions Duc-Anh by name, and is never off_topic: "
                   + "; ".join(topics) + ".") if topics else ""
@@ -254,7 +257,8 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
             note += ("\nA call was just booked for this visitor in this chat. Messages about making it longer, "
                      "changing its length, cancelling it, asking when it is, or booking another time are intent "
                      "\"booking\".")
-        msgs = [{"role": "system", "content": CLASSIFY + topic_note + note}, *state.get("history", [])[-6:],
+        msgs = [{"role": "system", "content": with_summary(CLASSIFY + topic_note + note, state)},
+                *state.get("history", [])[-settings.history_window:],
                 {"role": "user", "content": state["question"]}]
         try:
             c = await structured(router, Classification, msgs, recs, 800)
@@ -277,7 +281,7 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         """Break a complex question into 2-4 independent searches."""
         write = get_stream_writer()
         recs: list[CallRecord] = []
-        msgs = [{"role": "system", "content": PLAN}, *state.get("history", [])[-4:],
+        msgs = [{"role": "system", "content": with_summary(PLAN, state)}, *state.get("history", [])[-4:],
                 {"role": "user", "content": state["question"]}]
         try:
             p = await structured(router, Plan, msgs, recs, 800)
@@ -349,7 +353,12 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         return "answer"
 
     async def retrieve(state: State) -> dict:
-        return {"chunks": await retriever.search(state["search_query"])}
+        if settings.rerank != "llm":
+            return {"chunks": await retriever.search(state["search_query"])}
+        recs: list[CallRecord] = []
+        candidates = await retriever.search(state["search_query"], settings.rerank_candidates)
+        kept = await rerank_chunks(router, state["question"], candidates, settings.rerank_keep, recs)
+        return {"chunks": kept, "records": recs}
 
     async def answer(state: State) -> dict:
         write = get_stream_writer()
@@ -362,11 +371,11 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         chunks = state["chunks"]
         sources = "\n\n".join(f"[{i + 1}] {c['title']}\n{c['text']}" for i, c in enumerate(chunks))
         msgs = [{"role": "system",
-                 "content": ANSWER.format(
+                 "content": with_summary(ANSWER.format(
                      email=settings.contact_email, sources=sources,
                      length="up to 8 sentences, or a short list if comparing" if state.get("plan")
-                     else "2-5 sentences")},
-                *state.get("history", [])[-6:], {"role": "user", "content": state["question"]}]
+                     else "2-5 sentences"), state)},
+                *state.get("history", [])[-settings.history_window:], {"role": "user", "content": state["question"]}]
         recs: list[CallRecord] = []
         parts: list[str] = []
         try:
@@ -442,7 +451,30 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
                 "history": [{"role": "user", "content": state["question"]},
                             {"role": "assistant", "content": state["answer"]}]}
 
+    async def summarize(state: State) -> dict:
+        """Fold turns that fell out of the history window into a short summary (fails open: no summary, no harm)."""
+        hist = state.get("history", [])
+        upto = state.get("summary_upto", 0)
+        older = hist[upto:len(hist) - settings.history_window]
+        if len(older) < settings.summary_after:
+            return {}
+        notes = "\n".join(f"{m['role']}: {m['content'][:400]}" for m in older)
+        recs: list[CallRecord] = []
+        try:
+            text = await router.complete("fast", [
+                {"role": "system", "content": SUMMARIZE},
+                {"role": "user", "content": f"Current notes: {state.get('summary') or '(none)'}\n\n"
+                                            f"New messages:\n{notes}"}], recs, max_tokens=500, temperature=0.0)
+        except ProviderError:
+            return {}
+        text = " ".join(text.split())[:900]
+        if not text:
+            return {}
+        log.info("summarized", messages=len(older))
+        return {"summary": text, "summary_upto": len(hist) - settings.history_window, "records": recs}
+
     g = StateGraph(State)
+    g.add_node("summarize", summarize)
     g.add_node("classify", classify)
     g.add_node("retrieve", retrieve)
     g.add_node("answer", answer)
@@ -474,8 +506,9 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
     g.add_conditional_edges("reflect", after_reflect, ["research", "answer"])
     g.add_edge("answer", "verify")
     g.add_edge("verify", "finalize")
-    g.add_edge("finalize", END)
-    return g.compile(checkpointer=MemorySaver())
+    g.add_edge("finalize", "summarize")
+    g.add_edge("summarize", END)
+    return g.compile(checkpointer=checkpointer or MemorySaver())
 
 
 def make_booking_nodes(router: Router, calendar: bk.Calendar):
@@ -552,10 +585,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         if not (chip_extend or chip_len or again or chip_cancel):
             known = SAME.format(**last) if last else ""
             today = dt.datetime.now(sl.TZ).strftime("%A %Y-%m-%d %H:%M")
-            msgs = [{"role": "system", "content": EXTRACT.format(
+            msgs = [{"role": "system", "content": with_summary(EXTRACT.format(
                         slots=[f"{i + 1}. {x['label']}" for i, x in enumerate(slots)] or "none yet",
-                        known=known, today=today)},
-                    *state.get("history", [])[-6:], {"role": "user", "content": state["question"]}]
+                        known=known, today=today), state)},
+                    *state.get("history", [])[-settings.history_window:], {"role": "user", "content": state["question"]}]
             try:
                 f = await structured(router, bk.BookingFields, msgs, recs, 800)
             except (ProviderError, ValidationError):
@@ -806,6 +839,55 @@ ASK_EXISTING = re.compile(
     r"\b(when|what time)\b.{0,12}\b(is|was|are|did)\b.{0,12}\b(my|the)\b.{0,15}\b(appointment|booking|call|meeting)\b"
     r"|\b(do i have|did i book|have i booked|did i schedule)\b.{0,30}\b(appointment|booking|call|meeting)\b",
     re.IGNORECASE)
+class Ranking(BaseModel):
+    order: list[int] = []
+
+
+RERANK = ("You choose which numbered passages help answer a question. Return compact single-line JSON "
+          '{"order": [numbers]}: the numbers of the passages that contain information needed for the answer, best '
+          "first, at most KEEP of them. Leave out passages about something else, even if they share a word with the "
+          "question.")
+
+
+async def rerank_chunks(router: Router, question: str, chunks: list[dict], keep: int,
+                        recs: list[CallRecord]) -> list[dict]:
+    """Keep only the passages that help answer, best first. Any failure returns the original order unchanged."""
+    if len(chunks) <= 1:
+        return chunks[:keep]
+    listing = "\n".join(f"[{i + 1}] {c['title']}: {c['text'][:300]}" for i, c in enumerate(chunks))
+    try:
+        r = await structured(router, Ranking, [
+            {"role": "system", "content": RERANK.replace("KEEP", str(keep))},
+            {"role": "user", "content": f"Question: {question}\nPassages:\n{listing}"}], recs, 500)
+    except (ProviderError, ValidationError):
+        return chunks[:keep]
+    seen: set[int] = set()
+    out = []
+    for n in r.order:
+        if 1 <= n <= len(chunks) and n not in seen:
+            seen.add(n)
+            out.append(chunks[n - 1])
+    # Safety floor, measured in evals/rerank_study.py: always keep the retrieval's own top 2. Reranking alone lost
+    # recall (-0.05); with the floor recall is unchanged and the irrelevant passages still halve.
+    for c in chunks[:2]:
+        if c not in out:
+            out.append(c)
+    return (out or chunks)[:keep]
+
+
+def with_summary(system: str, state: dict) -> str:
+    """The system prompt plus a short summary of the turns that no longer fit in the history window."""
+    if not state.get("summary"):
+        return system
+    return system + "\n\nEarlier in this conversation (summary of older turns): " + state["summary"]
+
+
+SUMMARIZE = ("You keep notes on a conversation between a visitor and the assistant on Duc-Anh Nguyen's portfolio site. "
+             "Update the notes with the new messages. Keep only what later answers may need: what the visitor asked "
+             "about, names, email addresses and booking details they gave, preferences, decisions and open questions. "
+             "No pleasantries. Plain text, at most 120 words.")
+
+
 REPORT_ISSUE = "Report an issue with this chatbot to Duc-Anh"  # sent by the always-visible button in the widget
 
 
@@ -843,7 +925,7 @@ def make_message_nodes(router: Router, calendar: bk.Calendar):
         if qs.lower() in ("cancel", "no", "no, cancel", "never mind", "nevermind"):
             f.cancel = True
         else:
-            msgs = [{"role": "system", "content": EXTRACT}, *state.get("history", [])[-6:],
+            msgs = [{"role": "system", "content": with_summary(EXTRACT, state)}, *state.get("history", [])[-settings.history_window:],
                     {"role": "user", "content": state["question"]}]
             try:
                 f = await structured(router, bk.LeaveFields, msgs, recs, 800)

@@ -100,3 +100,67 @@ complex (`RESEARCH_MODE=auto`): 12/12 multi-hop questions are flagged, 2/28 sing
 - **Persistent weak spots.** "Which of his projects have private code?" stays at recall 0.25 in 2 of 3 runs: the site says
   "Repository private" / "not mine to publish", which neither keyword nor embedding search connects to "private code".
   Research mode does not fix retrieval vocabulary gaps; query expansion or better chunk text would.
+
+
+# Experiment 3: does an LLM reranker help? (7 Oct 2026, `evals/rerank_study.py`)
+
+**Question.** Retrieval returns 10 passages and the answer step sees the top 5. Some are irrelevant (an answer about gnhf came
+with Service Desk AI and EdgeLoop text). Would a cheap model call that picks the passages that help answer reduce that noise
+without losing the right one?
+
+**Design.** 35 questions: the 12 multi-hop ones (gold sections given) and the 23 answerable single-fact ones whose gold facts could
+be located in the corpus by substring (gold sections found automatically). Candidates are fetched once per question, so the
+baseline (first 5 passages) and the reranked context are exactly paired; the reranker runs twice per question. Metrics: recall of
+the gold sections in the context, and noise (passages in the context that are not gold). Paired bootstrap over questions.
+
+| Variant | Recall (baseline 0.859) | Irrelevant passages (baseline 3.60) |
+|---|---|---|
+| Rerank only | 0.806 (-0.053, CI [-0.137, +0.017]) | 1.43 (-2.17, CI [-2.70, -1.63]) |
+| **Rerank + always keep the retrieval's top 2** | **0.858 (-0.001, CI [-0.048, +0.043])** | **1.83 (-1.77, CI [-2.20, -1.33])** |
+
+Cost of either: about +$0.0002 per question and +1.5 s of latency (one extra fast-model call).
+
+**Decision.** Built in as `RERANK=llm` (with the top-2 floor), **off by default**. The noise reduction is real and large and recall
+is unchanged, but I have no reliable measure that a cleaner context improves the *answers* (the judge is not validated, see the
+calibration above), and 1.5 s is a noticeable price on every answer. Reranking alone is not safe: on one question it kept three
+passages and none was the right one.
+
+**Limits.** 35 questions, two reranker runs each; gold anchors for 23 of them were found by substring, not by hand; recall at the
+passage level, not answer quality.
+
+**Found on the way.** `Router.complete()` raised `KeyError('text')` when a reply was cut off by its token limit (the stream's
+"truncated" event has no text), crashing any structured call that hit its cap. Fixed and covered by a test.
+
+# Experiment 4: how much history should each step see, and does a summary help? (7 Oct 2026, `evals/context_study.py`)
+
+**Question.** Every step sees the last N messages. When a visitor refers back ("how is it trained?") to something that fell out of
+that window, the follow-up can no longer be resolved. Would a running summary of the older turns fix that, and how often should it
+be refreshed?
+
+**Design.** Six scenarios: ask about a project (turn A), send k small-talk turns (k = 2, 4, 8), then ask a question that only makes
+sense given turn A. The run stops before the answer; the metric is whether the section A was about is among the retrieved passages.
+Configurations: history window of 2, 6 or 10 messages, with no summary, or a summary refreshed once 12 or 4 messages have fallen
+out of the window. Conversations run one at a time; a conversation in which any model call failed is discarded and repeated (a first
+run with three in parallel was contaminated by provider throttling and was thrown away, as in INC-005; this run discarded none).
+
+| Configuration | gap 2 turns | gap 4 | gap 8 | mean |
+|---|---|---|---|---|
+| window 2, no summary | 0.50 | 0.33 | 0.50 | 0.44 |
+| window 6, no summary (previous behaviour) | 0.83 | 0.83 | 0.50 | 0.72 |
+| window 10, no summary | 1.00 | 0.83 | 0.50 | 0.78 |
+| window 6, summary after 12 messages | 1.00 | 0.50 | 1.00 | 0.83 |
+| **window 6, summary after 4 messages** | **1.00** | **1.00** | **1.00** | **1.00** |
+
+**Reading.** A larger window only postpones the problem (window 10 still fails at 8 turns). A summary that waits for 12 older
+messages leaves a gap: turns that are neither in the window nor yet summarised are lost (0.50 at a gap of 4). Refreshing after 4
+messages closes it: 18 of 18 follow-ups resolved, against 13 of 18 with the plain window.
+
+**Decision.** Default `HISTORY_WINDOW=6`, `SUMMARY_AFTER=4`. Cost: one fast-model call about every second turn once a chat has
+more than 3 exchanges (about $0.0001 and 0.5 to 1 s, added before the answer is marked complete).
+
+**Limits.** Six scenarios per cell, 18 per configuration; the filler turns are small talk, which is easier to summarise than a
+real long conversation; retrieval of the right section is the metric, not answer quality.
+
+## Not done on purpose: memory across chats
+Nothing is kept per visitor between chats. There is no product reason (a visitor asks a handful of questions), and it would turn a
+30-day log into long-term personal data. If it ever matters it needs an explicit consent and retention rule first.

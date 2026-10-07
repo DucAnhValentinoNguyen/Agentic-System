@@ -36,7 +36,8 @@ request only and never stored.
   (about 1 in 20 on one tested question).
 - The judge is not yet validated for recall; its absolute rates should not be quoted.
 - Sample sizes are small (24 held-out questions, one corpus); intervals are wide.
-- Conversation state lives in memory, so the service runs as a single instance.
+- Chat state is in Firestore, but the per-minute rate limit is per instance, so with several instances it is looser than
+  it looks; the spend caps and the per-visitor daily cap are shared.
 - Voice is push-to-talk (about 2 s), not a live call. German and product names are transcribed less accurately.
 - Text from visitors reaches the calendar and the owner's inbox unverified (labelled as such).
 
