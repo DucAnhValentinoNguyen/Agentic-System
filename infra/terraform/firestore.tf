@@ -4,7 +4,7 @@ locals {
     "run.googleapis.com", "artifactregistry.googleapis.com", "aiplatform.googleapis.com",
     "secretmanager.googleapis.com", "monitoring.googleapis.com", "logging.googleapis.com",
     "billingbudgets.googleapis.com", "calendar-json.googleapis.com", "gmail.googleapis.com",
-    "firestore.googleapis.com", "cloudscheduler.googleapis.com",
+    "firestore.googleapis.com", "cloudscheduler.googleapis.com", "cloudbilling.googleapis.com", "pubsub.googleapis.com",
   ]
 }
 

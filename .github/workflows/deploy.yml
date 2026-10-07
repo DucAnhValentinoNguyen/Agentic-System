@@ -60,6 +60,11 @@ jobs:
         run: gcloud run services update-traffic twin-agent-api --region "$REGION" --to-latest --quiet
       - name: Keep the online judge job on the same image
         run: gcloud run jobs update twin-online-judge --region "$REGION" --image "$IMAGE:${GITHUB_SHA::12}" --quiet
+      - name: Keep the billing guard on the same image
+        run: |
+          if gcloud run services describe twin-billing-guard --region "$REGION" >/dev/null 2>&1; then
+            gcloud run services update twin-billing-guard --region "$REGION" --image "$IMAGE:${GITHUB_SHA::12}" --quiet
+          fi
       - name: Remove the candidate tag
         if: always()
         run: gcloud run services update-traffic twin-agent-api --region "$REGION" --remove-tags candidate --quiet
