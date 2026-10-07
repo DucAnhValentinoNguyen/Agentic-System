@@ -12,8 +12,8 @@ terraform {
 
 variable "project" { default = "agentsystems-510414" }
 variable "region" { default = "europe-west3" }
-variable "daily_budget_usd" { default = 2 }
-variable "monthly_budget_usd" { default = 12 }
+variable "daily_budget_usd" { default = 1 } # paid model spend; after it, only free providers (Groq) answer
+variable "monthly_budget_usd" { default = 3 }
 variable "daily_turns_per_ip" { default = 150 }
 variable "public_api_url" { default = "https://twin-agent-api-7yjacf5bma-ey.a.run.app" } # base of the cancel links
 variable "session_store" { default = "firestore" }                                       # "memory" keeps a chat in one process (then max_instances must be 1)
@@ -37,6 +37,17 @@ resource "google_artifact_registry_repository" "twin" {
   repository_id = "twin"
   location      = var.region
   format        = "DOCKER"
+  # Every deploy adds an image (about 160 MB); storage beyond 0.5 GB is billed. Keep the recent ones only.
+  cleanup_policies {
+    id     = "keep-recent"
+    action = "KEEP"
+    most_recent_versions { keep_count = 8 }
+  }
+  cleanup_policies {
+    id     = "delete-older"
+    action = "DELETE"
+    condition { older_than = "1209600s" } # 14 days
+  }
 }
 
 resource "google_service_account" "agent" {
@@ -210,7 +221,9 @@ resource "google_cloud_run_v2_service" "retrieval" {
   template {
     service_account = google_service_account.retrieval.email
     scaling {
-      min_instance_count = 1 # a cold start would blow the caller's 3 s deadline
+      # 0 keeps an idle service free. The first search after a quiet spell may exceed the agent's 3 s deadline and
+      # fall back to in-process keyword search (an alert counts those); later searches use the service again.
+      min_instance_count = 0
       max_instance_count = 2
     }
     containers {

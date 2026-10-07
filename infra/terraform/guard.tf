@@ -2,7 +2,7 @@
 # small private service reads each message and, once the cost reaches the limit, detaches billing from the project.
 # Then nothing can be charged any more, whatever credential an attacker holds. The price is that Twin is down until
 # billing is linked again (see README, "Hard stop"). It starts in dry-run mode: set guard_dry_run = false once verified.
-variable "kill_switch_eur" { default = 200 }
+variable "kill_switch_eur" { default = 5 }              # real money: cost after credits
 variable "guard_dry_run" { default = false }            # true logs "would detach" and does nothing
 variable "guard_image_tag" { default = "1db6f788f3b0" } # only for creation; the deploy workflow keeps it current
 
@@ -107,7 +107,7 @@ resource "google_billing_budget" "guard" {
   display_name    = local.guard_budget_name
   budget_filter {
     projects               = ["projects/${var.project_number}"]
-    credit_types_treatment = "EXCLUDE_ALL_CREDITS" # real usage, whether or not credits cover it
+    credit_types_treatment = "INCLUDE_ALL_CREDITS" # cost after credits = money charged to the card; credits cover it first
   }
   amount {
     specified_amount {

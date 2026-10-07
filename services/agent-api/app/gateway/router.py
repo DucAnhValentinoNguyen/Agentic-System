@@ -91,6 +91,7 @@ class Provider:
     extra: dict = field(default_factory=dict)  # provider-specific request params
     throttled_until: float = 0.0  # monotonic time until which a recent 429 makes us skip this provider
     token_headroom: int = 0  # reasoning models spend max_tokens on thinking; add room
+    paid: bool = True  # False: costs this project nothing (Groq's free tier, a local model), so the budget does not apply
 
     async def client(self, trace: bool = True) -> AsyncOpenAI:
         raise NotImplementedError
@@ -139,6 +140,7 @@ class Router:
         self.pending_usd = 0.0  # spent here since the last flush to the shared total
         self._day = time.strftime("%Y-%m-%d")
         self.calls: list[CallRecord] = []  # recent calls, for /v1/status
+        self.paid_names = {p.name for p in providers if p.paid}
 
     def over_budget(self) -> bool:
         today = time.strftime("%Y-%m-%d")
@@ -166,8 +168,9 @@ class Router:
             rec.tokens_out = (usage.total_tokens or 0) - rec.tokens_in
             pin, pout = PRICES.get(rec.model, PRICES.get(rec.provider, (0, 0)))
             rec.cost_usd = (rec.tokens_in * pin + rec.tokens_out * pout) / 1e6
-            self.spent_today_usd += rec.cost_usd
-            self.pending_usd += rec.cost_usd
+            if rec.provider in self.paid_names:  # free providers are priced for display only, never counted as spend
+                self.spent_today_usd += rec.cost_usd
+                self.pending_usd += rec.cost_usd
         rec.latency_ms = (time.monotonic() - t0) * 1000
         self.calls = (self.calls + [rec])[-200:]
         log.info("llm_call", **rec.__dict__)
@@ -183,6 +186,10 @@ class Router:
         """
         failed_from = None
         providers = [p for p in self.providers if only is None or p.name in only]
+        if self.over_budget():  # the paid budget is used up: only providers that cost nothing may answer
+            providers = [p for p in providers if not p.paid]
+            if not providers:
+                raise ProviderError("model budget used up")
         for i, p in enumerate(providers):
             if not p.breaker.available():
                 failed_from = failed_from or p.name
@@ -293,11 +300,13 @@ def build_router() -> Router:
         )
         g.extra = {"reasoning_effort": "low"}
         g.token_headroom = 400
+        g.paid = False  # free tier: keeps Twin answering when the paid budget is used up
         providers.append(g)
     if settings.local_base_url and settings.local_model:
         loc = OpenAICompatProvider("local", {"fast": settings.local_model, "strong": settings.local_model},
                                    settings.local_base_url, "ollama")
         loc.token_headroom = settings.local_token_headroom
+        loc.paid = False
         if "gpt-oss" in settings.local_model:
             loc.extra = {"reasoning_effort": "low"}
         providers.append(loc)

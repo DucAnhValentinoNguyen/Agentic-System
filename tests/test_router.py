@@ -1,5 +1,6 @@
 """Router behaviour with fake providers: fallback, mid-stream retraction, breaker."""
 
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -158,3 +159,41 @@ async def test_complete_returns_the_text_so_far_when_the_reply_was_truncated():
         return c
     a.client = client
     assert await Router([a]).complete("strong", [], []) == "Hello there. Partial sen"
+
+
+async def test_when_the_paid_budget_is_used_up_only_the_free_provider_answers(monkeypatch):
+    paid, free = FakeProvider("vertex", ["from vertex"]), FakeProvider("groq", ["from groq"])
+    free.paid = False
+    r = Router([paid, free])
+    monkeypatch.setattr(settings, "daily_budget_usd", 1.0)
+    r.spent_today_usd = 2.0                                          # the paid budget is gone
+    assert r.over_budget()
+    assert await r.complete("strong", [], []) == "from groq"
+    assert paid.n == 0                                               # the paid provider was never called
+
+
+async def test_with_budget_left_the_paid_provider_comes_first(monkeypatch):
+    paid, free = FakeProvider("vertex", ["from vertex"]), FakeProvider("groq", ["from groq"])
+    free.paid = False
+    monkeypatch.setattr(settings, "daily_budget_usd", 100.0)
+    assert await Router([paid, free]).complete("strong", [], []) == "from vertex"
+
+
+async def test_with_no_free_provider_an_exhausted_budget_refuses(monkeypatch):
+    monkeypatch.setattr(settings, "daily_budget_usd", 1.0)
+    r = Router([FakeProvider("vertex", ["x"])])
+    r.spent_today_usd = 5.0
+    with pytest.raises(ProviderError):
+        await r.complete("strong", [], [])
+
+
+def test_only_paid_calls_count_as_spend():
+    from app.gateway.router import CallRecord
+    paid, free = FakeProvider("vertex", ["x"]), FakeProvider("groq", ["x"])
+    free.paid = False
+    r = Router([paid, free])
+    usage = SimpleNamespace(prompt_tokens=1_000_000, total_tokens=1_100_000)
+    for name, model in (("vertex", "google/gemini-2.5-flash"), ("groq", "openai/gpt-oss-120b")):
+        rec = CallRecord(provider=name, model=model, tier="strong")
+        r._finish(rec, usage, time.monotonic())
+    assert r.pending_usd == pytest.approx(0.30 + 0.1 * 2.5)          # only the Vertex call: input 1M tokens + output 0.1M

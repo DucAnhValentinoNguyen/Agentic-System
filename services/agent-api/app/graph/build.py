@@ -380,8 +380,6 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         recs: list[CallRecord] = []
         parts: list[str] = []
         try:
-            if router.over_budget():
-                raise ProviderError("daily budget reached")
             async for ev in router.stream("strong", msgs, recs, max_tokens=1500, temperature=0.2):
                 if ev["type"] == "truncated":
                     # Cut off by the token limit: keep only whole sentences.

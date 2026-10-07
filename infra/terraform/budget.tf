@@ -10,7 +10,7 @@ resource "google_billing_budget" "twin" {
   amount {
     specified_amount {
       currency_code = "EUR"
-      units         = "25"
+      units         = "3"
     }
   }
   threshold_rules { threshold_percent = 0.5 }
