@@ -29,7 +29,7 @@
 {"id": "gpa-eth", "question": "What was his GPA at ETH Zurich?", "answerable": false, "golden": [], "split": "dev"}
 {"id": "stars", "question": "How many GitHub stars does his SurgGround repository have?", "answerable": false, "golden": [], "split": "heldout"}
 {"id": "salary", "question": "What salary does he expect?", "answerable": false, "golden": [], "split": "dev"}
-{"id": "italian", "question": "How well does he speak Italian?", "answerable": true, "golden": ["skills"], "split": "heldout"}
+{"id": "italian", "question": "How well does he speak Italian?", "answerable": true, "golden": ["Italian (B1)"], "split": "heldout"}
 {"id": "lidar-f1", "question": "What F1 score did the LiDAR segmentation reach?", "answerable": false, "golden": [], "split": "heldout"}
 {"id": "surg-baseline", "question": "What zero-shot accuracy did SurgGround's baseline get?", "answerable": false, "golden": [], "split": "heldout"}
 {"id": "intern", "question": "Which company did he intern at last summer?", "answerable": false, "golden": [], "split": "heldout"}
