@@ -213,7 +213,20 @@ MARK = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def build_graph(router: Router, retriever, calendar: bk.Calendar):
+def site_topics(titles: list[str], limit: int = 40) -> list[str]:
+    """Short names of what the site covers (project names, employers, courses), from the section titles."""
+    seen: dict[str, None] = {}
+    for t in titles:
+        head = re.split(r"\s[—–:·]\s", t)[0].strip()
+        if 2 <= len(head) <= 60 and head.lower() not in {"about", "contact", "skills", "education"}:
+            seen[head] = None
+    return list(seen)[:limit]
+
+
+def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[str] | None = None):
+    topic_note = ("\nThe site covers these projects and topics. A question about any of them is intent "
+                  "\"question\" even if it never mentions Duc-Anh by name, and is never off_topic: "
+                  + "; ".join(topics) + ".") if topics else ""
     async def classify(state: State) -> dict:
         recs: list[CallRecord] = []
         b = state.get("booking") or {}
@@ -235,7 +248,7 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar):
         if state.get("last_booking"):
             note += ("\nA call was just booked for this visitor in this chat. Messages about making it longer, "
                      "changing its length, or booking another time are intent \"booking\".")
-        msgs = [{"role": "system", "content": CLASSIFY + note}, *state.get("history", [])[-6:],
+        msgs = [{"role": "system", "content": CLASSIFY + topic_note + note}, *state.get("history", [])[-6:],
                 {"role": "user", "content": state["question"]}]
         try:
             c = await structured(router, Classification, msgs, recs, 800)

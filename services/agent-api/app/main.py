@@ -20,7 +20,7 @@ from . import stt
 from .booking import Calendar
 from .config import settings
 from .gateway.router import ProviderError, build_router
-from .graph.build import build_graph
+from .graph.build import build_graph, site_topics
 from .retrieval import Index
 from .retrieval_client import LocalRetriever, RemoteRetriever
 from .store import Store
@@ -71,7 +71,8 @@ async def lifespan(app: FastAPI):
     app.state.router = router
     app.state.store = Store()
     app.state.tasks = set()  # strong refs to fire-and-forget storage tasks
-    app.state.graph = build_graph(router, retriever, Calendar(app.state.store))
+    app.state.graph = build_graph(router, retriever, Calendar(app.state.store),
+                                  topics=site_topics([c["title"] for c in index.chunks]))
     app.state.hits = defaultdict(deque)   # ip -> recent turn timestamps
     app.state.turns = defaultdict(int)    # session -> turn count
     app.state.done_turns = {}             # (session, turn_id) -> final event (idempotent replay)
