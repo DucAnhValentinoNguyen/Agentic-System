@@ -631,8 +631,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                 return say(f"There are no free slots in the next week. Please email {settings.contact_email}.",
                            booking={})
             b["stage"] = "choosing"
-            return say("Thanks! These times are free. Which one works for you?", [x["label"] for x in slots],
-                       booking=b)
+            return say("Thanks! These times are free. Pick one, or type a day and time that suits you and I'll check "
+                       "it.", [x["label"] for x in slots], booking=b)
         if f.slot_choice and 1 <= f.slot_choice <= len(slots):
             b["chosen"] = slots[f.slot_choice - 1]
         if b.get("chosen"):
@@ -664,11 +664,9 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             out = say(text, ["Yes, book it", "No, cancel"], booking=b)
             out["history"] = [{"role": "user", "content": state["question"]}, {"role": "assistant", "content": text}]
             return out
-        no_match = b.get("stage") == "choosing" and not (qs.isdigit() or qs in {x["label"] for x in slots})
         b["stage"] = "choosing"
-        text = ("I don't have that exact time. Which of these works for you?" if no_match else
-                "Which of these times works for you?")
-        return say(text, [x["label"] for x in slots], booking=b)
+        return say("Which of these times works for you? You can also type a day and time, "
+                   "for example \"Thursday at 3pm\", and I'll check it.", [x["label"] for x in slots], booking=b)
 
     async def book_confirm(state: State) -> dict:
         # Pauses the graph. Nothing runs before interrupt(), so the resume replay is side-effect free.
