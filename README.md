@@ -1,10 +1,9 @@
 # Twin: an operated agent for ducanhvalentinonguyen.com
 
 A chat assistant ("Hi, I'm Duc-Anh's twin") that answers questions about Duc-Anh from his portfolio site,
-cites the section it used (and scrolls the page to it), and can book a call on his Google Calendar. Built in
-three days as a hackathon to show the whole loop: agent, tools, evaluation, deployment, operations.
+cites the section it used (and scrolls the page to it), and can book a call on his Google Calendar. 
 
-Try it: <https://ducanhvalentinonguyen.com/?twin=1>
+Try it: <https://ducanhvalentinonguyen.com/>
 
 ```mermaid
 flowchart LR
