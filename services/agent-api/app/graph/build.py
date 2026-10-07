@@ -59,6 +59,7 @@ class State(TypedDict, total=False):
     verify: dict
     booking: dict
     last_booking: dict
+    visitor: dict  # name, email, topic given in this chat; survives a cancelled or declined booking
     leave: dict
     messages_sent: int
     choices: list[str]
@@ -481,7 +482,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         "\"2026-10-08T15:00:00+02:00\"; null if they only picked from the shown slots or named no time), "
         "minutes (the length they ask for a NEW meeting: 30, 60 or 90, or null), extend_to_minutes (the TOTAL "
         "length in minutes they want for an EXISTING booked meeting, for example 60, 90 or 120, else null), "
-        "cancel (true if they want to stop). Use null for "
+        "cancel (true ONLY if they clearly say to stop, cancel or never mind; a complaint, a question or a "
+        "correction is NOT a cancel). Use null for "
         "anything not stated. Never invent values. Answer with compact single-line JSON.\n"
         "Today is {today}, Europe/Berlin.\n"
         "Slots shown to the visitor: {slots}\n{known}"
@@ -511,7 +513,9 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             write({"type": "delta", "text": text})
             if choices:
                 write({"type": "choices", "options": choices})
-            return {"answer": text, "choices": choices or [], "confirmed": None, "records": recs, **extra}
+            who = {k: b[k] for k in ("name", "email", "topic") if b.get(k)}
+            return {"answer": text, "choices": choices or [], "confirmed": None, "records": recs,
+                    "visitor": who or state.get("visitor") or {}, **extra}
 
         if not b.get("stage") and not last:
             # A fresh request: point to the booking page first, and offer to do it right here.
@@ -594,6 +598,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             b = {"stage": "collecting", **{k: last[k] for k in ("name", "email", "topic")}}
         elif not b.get("stage"):
             b = {"stage": "collecting"}
+        known = state.get("visitor") or {}
+        if known and not any(b.get(k) for k in ("name", "email", "topic")):
+            b.update({k: known[k] for k in ("name", "email", "topic") if known.get(k)})  # do not ask again
+            b["reused"] = True
         if f.name:
             b["name"] = f.name.strip()[:80]
         if f.email and bk.EMAIL.fullmatch(f.email.strip()):
@@ -644,8 +652,11 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                 return say(f"There are no free slots in the next week. Please email {settings.contact_email}.",
                            booking={})
             b["stage"] = "choosing"
-            return say("Thanks! These times are free. Pick one, or type a day and time that suits you and I'll check "
-                       "it.", [x["label"] for x in slots], booking=b)
+            intro = ("Thanks! These times are free." if not b.pop("reused", False) else
+                     f"I'll use your details from earlier ({b['name']}, {b['email']}, \"{b['topic']}\"); "
+                     "tell me if any changed. These times are free.")
+            return say(f"{intro} Pick one, or type a day and time that suits you and I'll check it.",
+                       [x["label"] for x in slots], booking=b)
         if f.slot_choice and 1 <= f.slot_choice <= len(slots):
             b["chosen"] = slots[f.slot_choice - 1]
         if b.get("chosen"):
@@ -694,7 +705,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             text = ("I didn't get a clear yes, so I haven't changed anything. "
                     "Say 'book a call' whenever you want to start again.")
             write({"type": "delta", "text": text})
-            return {"booking": {}, "answer": text, "choices": []}
+            who = {k: b[k] for k in ("name", "email", "topic") if b.get(k)}
+            return {"booking": {}, "answer": text, "choices": [], "visitor": who or state.get("visitor") or {}}
         extending = b.get("mode") == "extend"
         try:
             if extending:
@@ -718,7 +730,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             "daily_cap": f"Today's booking limit is reached. Please email {settings.contact_email}.",
         }.get(status, f"I couldn't complete that. Please email {settings.contact_email}.")
         choices: list[str] = []
-        out: dict = {"booking": {}, "choices": choices}
+        out: dict = {"booking": {}, "choices": choices,
+                     "visitor": {k: b[k] for k in ("name", "email", "topic") if b.get(k)}}
         if status in ("created", "extended", "already_created", "already_extended"):
             start = b["start"] if extending else b["chosen"]["start"]
             out["last_booking"] = {"name": b["name"], "email": b["email"], "topic": b["topic"],

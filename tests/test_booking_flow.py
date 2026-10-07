@@ -200,3 +200,29 @@ async def test_a_visitor_typed_time_that_is_taken_offers_nearby_times(chat):
     assert "isn't available" in out["answer"] and out["choices"] == [SLOTS[0]["label"]]
     out = await turn(SLOTS[0]["label"])                                    # still bookable from the fallback list
     assert out["choices"] == ["30 min", "60 min", "90 min"]
+
+
+async def test_after_declining_the_visitor_is_not_asked_who_they_are_again(chat):
+    # The conversation from the screenshot: details given, call proposed, "No, cancel", then "book a call" again.
+    turn, cal = chat
+    await book_one(turn)
+    await turn("30 min")
+    out = await turn("No, cancel")
+    assert cal.created == [] and "haven't changed anything" in out["answer"]
+    out = await turn("book a call")
+    assert out["choices"] == ["Book it for me here"]
+    out = await turn("Book it for me here")                                # no details in this message
+    assert "Could you tell me" not in out["answer"]
+    assert "ann@example.com" in out["answer"] and out["choices"] == [s["label"] for s in SLOTS]
+    await turn(SLOTS[0]["label"])
+    await turn("30 min")
+    await turn("Yes, book it")
+    assert cal.created == [("Ann", "ann@example.com", "internship", START, 1)]
+
+
+async def test_a_complaint_is_not_a_cancel(chat):
+    turn, _ = chat
+    await turn("book a call")
+    await turn("Book it for me here", DETAILS)
+    out = await turn("you dont remember my name, I just said it", {"cancel": False})
+    assert "dropped the booking" not in out["answer"] and out["choices"] == [s["label"] for s in SLOTS]
