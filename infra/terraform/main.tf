@@ -3,10 +3,19 @@ terraform {
   required_providers {
     google = { source = "hashicorp/google", version = "~> 6.0" }
   }
+  backend "gcs" {
+    bucket = "agentsystems-510414-tfstate"
+    prefix = "twin"
+  }
 }
 
 variable "project" { default = "agentsystems-510414" }
 variable "region" { default = "europe-west3" }
+variable "daily_budget_usd" { default = 2 }
+variable "monthly_budget_usd" { default = 12 }
+variable "daily_turns_per_ip" { default = 150 }
+variable "session_store" { default = "memory" } # "firestore" once the service may run more than one instance
+variable "max_instances" { default = 1 }
 variable "image_tag" { description = "Image tag to deploy (git sha)" }
 variable "alert_email" { description = "Where alerts and budget emails go (set ALERT_EMAIL in .env)" }
 variable "fault_inject" { default = "" }
@@ -50,15 +59,20 @@ resource "google_cloud_run_v2_service" "agent" {
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
 
+  lifecycle {
+    # The deploy workflow rolls out new images with gcloud; Terraform must not roll them back.
+    ignore_changes = [client, client_version, scaling, template[0].containers[0].image]
+  }
+
   template {
     service_account  = google_service_account.agent.email
     timeout          = "3600s" # WebSocket connections live inside one request
     session_affinity = true
     scaling {
       min_instance_count = 0
-      # Session state is in memory until Cloud SQL lands; one instance keeps it consistent
-      # and caps spend.
-      max_instance_count = 1
+      # With SESSION_STORE=memory a chat lives in one process, so this must stay 1. With "firestore" any
+      # instance can serve any chat; spend is capped by the shared daily and monthly budgets, not by this number.
+      max_instance_count = var.max_instances
     }
     max_instance_request_concurrency = 80
     containers {
@@ -115,6 +129,22 @@ resource "google_cloud_run_v2_service" "agent" {
         name  = "FAULT_INJECT"
         value = var.fault_inject
       }
+      env {
+        name  = "DAILY_BUDGET_USD"
+        value = tostring(var.daily_budget_usd)
+      }
+      env {
+        name  = "MONTHLY_BUDGET_USD"
+        value = tostring(var.monthly_budget_usd)
+      }
+      env {
+        name  = "DAILY_TURNS_PER_IP"
+        value = tostring(var.daily_turns_per_ip)
+      }
+      env {
+        name  = "SESSION_STORE"
+        value = var.session_store
+      }
       startup_probe {
         http_get { path = "/health" }
         period_seconds    = 3
@@ -151,6 +181,11 @@ resource "google_cloud_run_v2_service" "retrieval" {
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
+
+  lifecycle {
+    # The deploy workflow rolls out new images with gcloud; Terraform must not roll them back.
+    ignore_changes = [client, client_version, scaling, template[0].containers[0].image]
+  }
 
   template {
     service_account = google_service_account.retrieval.email

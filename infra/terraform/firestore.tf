@@ -24,7 +24,7 @@ resource "google_firestore_database" "default" {
 
 # The privacy page promises 30-day deletion: Firestore enforces it with a TTL on expire_at.
 resource "google_firestore_field" "ttl" {
-  for_each   = toset(["turns", "audit", "counters"])
+  for_each   = toset(["turns", "audit", "counters", "ipdays", "sessions", "checkpoints", "blobs", "writes"])
   collection = each.key
   field      = "expire_at"
   ttl_config {}

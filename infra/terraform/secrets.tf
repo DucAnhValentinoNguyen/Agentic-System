@@ -22,8 +22,9 @@ locals {
   }
 }
 
+# The secret names are fixed, so a CI run without the values (they are placeholders there) never plans to delete them.
 resource "google_secret_manager_secret" "s" {
-  for_each  = nonsensitive(toset([for k, v in local.secrets : k if v != ""]))
+  for_each  = toset(keys(local.secrets))
   secret_id = lower(replace(each.key, "_", "-"))
   replication {
     auto {}
@@ -34,6 +35,11 @@ resource "google_secret_manager_secret_version" "s" {
   for_each    = google_secret_manager_secret.s
   secret      = each.value.id
   secret_data = local.secrets[each.key]
+  lifecycle {
+    # Values are set when a secret is created and rotated on purpose (gcloud secrets versions add, or
+    # terraform apply -replace=...). CI runs with placeholders and must never overwrite a real value.
+    ignore_changes = [secret_data]
+  }
 }
 
 resource "google_secret_manager_secret_iam_member" "agent" {

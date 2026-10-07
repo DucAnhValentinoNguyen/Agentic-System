@@ -1,0 +1,75 @@
+# Terraform from CI.
+#   plan   runs on every push to main that touches infra/terraform, as a read-only identity, without refreshing: it
+#          shows what the configuration would change compared with the last applied state.
+#   apply  runs only when started by hand with apply=true, and only after a reviewer approves the "production"
+#          environment. It refreshes, plans again and applies. State lives in a versioned GCS bucket with locking.
+name: terraform
+on:
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**", ".github/workflows/terraform.yml"]
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the plan (asks for approval first)"
+        type: boolean
+        default: false
+
+permissions: { contents: read, id-token: write }
+concurrency: { group: terraform, cancel-in-progress: false }
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+  PROVIDER: projects/1058744794873/locations/global/workloadIdentityPools/github/providers/github
+  # Secret values are never needed here: the secret versions ignore changes to their data (infra/terraform/secrets.tf).
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+  TF_VAR_groq_api_key: placeholder
+  TF_VAR_langfuse_public_key: placeholder
+  TF_VAR_langfuse_secret_key: placeholder
+  TF_VAR_google_calendar_token: placeholder
+  TF_VAR_image_tag: unused  # the image is rolled out by the deploy workflow; Terraform ignores it
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: infra/terraform } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.PROVIDER }}
+          service_account: twin-tf-plan@agentsystems-510414.iam.gserviceaccount.com
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.16.0", terraform_wrapper: false }
+      - run: terraform fmt -check -recursive
+      - run: terraform init
+      - run: terraform validate
+      - name: Plan (read-only, no refresh, no lock)
+        run: |
+          set +e
+          terraform plan -refresh=false -lock=false -no-color -detailed-exitcode | tee plan.txt
+          code=${PIPESTATUS[0]}
+          { echo '### terraform plan'; echo '```'; tail -40 plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          [ "$code" = 0 ] && echo "No changes." >> "$GITHUB_STEP_SUMMARY"
+          [ "$code" = 2 ] && echo "Changes are pending: start this workflow with apply=true to apply them." >> "$GITHUB_STEP_SUMMARY"
+          [ "$code" = 1 ] && exit 1
+          exit 0
+
+  apply:
+    needs: plan
+    if: github.event_name == 'workflow_dispatch' && inputs.apply
+    runs-on: ubuntu-latest
+    environment: production  # a reviewer must approve before this job starts
+    defaults: { run: { working-directory: infra/terraform } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.PROVIDER }}
+          service_account: twin-tf-apply@agentsystems-510414.iam.gserviceaccount.com
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.16.0", terraform_wrapper: false }
+      - run: terraform init
+      - run: terraform plan -out=tfplan -no-color
+      - run: terraform apply -no-color tfplan

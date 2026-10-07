@@ -223,12 +223,16 @@ resource "google_monitoring_dashboard" "twin" {
           { t = "Structured-output parse failures", f = "metric.type=\"logging.googleapis.com/user/twin_structured_retry\" resource.type=\"cloud_run_revision\"", a = "ALIGN_RATE" },
           { t = "Turn latency p95 (ms)", f = "metric.type=\"logging.googleapis.com/user/twin_turn_latency_ms\" resource.type=\"cloud_run_revision\"", a = "ALIGN_PERCENTILE_95" },
           ] : {
-          xPos = (i % 2) * 6, yPos = floor(i / 2) * 4, width = 6, height = 4
+          # The API drops zero coordinates and adds targetAxis, so write the document the way it comes back.
+          width = 6, height = 4
+          xPos  = i % 2 == 1 ? 6 : null
+          yPos  = i >= 2 ? floor(i / 2) * 4 : null
           widget = {
             title = w.t
             xyChart = {
               dataSets = [{
-                plotType = "LINE"
+                plotType   = "LINE"
+                targetAxis = "Y1"
                 timeSeriesQuery = { timeSeriesFilter = {
                   filter      = w.f
                   aggregation = { alignmentPeriod = "300s", perSeriesAligner = w.a }
@@ -240,5 +244,10 @@ resource "google_monitoring_dashboard" "twin" {
       ]
     }
   })
+  lifecycle {
+    # The API rewrites the document (defaults, etag, name), so Terraform would show a permanent diff.
+    # To change the dashboard, edit it above and run: terraform apply -replace=google_monitoring_dashboard.twin
+    ignore_changes = [dashboard_json]
+  }
   depends_on = [google_logging_metric.counter, google_logging_metric.turn_latency]
 }
