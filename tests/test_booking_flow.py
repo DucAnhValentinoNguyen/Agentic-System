@@ -31,7 +31,7 @@ class FakeCal:
     enabled = True
 
     def __init__(self):
-        self.created, self.extended, self.held, self.room = [], [], 0, 3
+        self.created, self.extended, self.cancelled, self.held, self.room = [], [], [], 0, 3
 
     async def free_slots(self):
         return SLOTS
@@ -51,6 +51,11 @@ class FakeCal:
         self.extended.append((email, start, total))
         self.held = total
         return {"status": "extended", "label": f"label x{total}", "slots": total, "remaining": 3 - self.held}
+
+    async def cancel(self, email, start):
+        self.cancelled.append((email, start))
+        self.held = 0
+        return {"status": "cancelled", "label": "label"}
 
     async def check_time(self, start, slots=1):
         if start == DIRECT_FREE:
@@ -226,3 +231,63 @@ async def test_a_complaint_is_not_a_cancel(chat):
     await turn("Book it for me here", DETAILS)
     out = await turn("you dont remember my name, I just said it", {"cancel": False})
     assert "dropped the booking" not in out["answer"] and out["choices"] == [s["label"] for s in SLOTS]
+
+
+async def test_cancelling_a_booked_call_really_cancels_it_after_a_confirmation(chat):
+    # The screenshot: booked 90 minutes, "please cancel it" was answered "dropped" while the event stayed on the calendar.
+    turn, cal = chat
+    await book_one(turn)
+    await turn("90 min")
+    out = await turn("Yes, book it")
+    assert "Booked!" in out["answer"] and cal.held == 3
+    out = await turn("oh shoot I have schedule conflict, please cancel it", {"cancel": True})
+    assert "To confirm: cancel your call" in out["answer"] and out["choices"] == ["Yes, cancel it", "No, keep it"]
+    assert cal.cancelled == []                                              # nothing happens before the confirmation
+    out = await turn("Yes, cancel it")
+    assert cal.cancelled == [("ann@example.com", START)] and "is cancelled" in out["answer"]
+    await turn("book a call")                                               # and they can book again, details remembered
+    out = await turn("Book it for me here")
+    assert "ann@example.com" in out["answer"]
+    out = await turn(SLOTS[0]["label"])
+    assert out["choices"] == ["30 min", "60 min", "90 min"]
+
+
+async def test_declining_the_cancellation_keeps_the_call(chat):
+    turn, cal = chat
+    await book_one(turn)
+    await turn("30 min")
+    await turn("Yes, book it")
+    await turn("cancel my call", {"cancel": True})
+    out = await turn("No, keep it")
+    assert cal.cancelled == [] and "stays as it is" in out["answer"]
+
+
+async def test_stopping_an_unfinished_booking_never_claims_a_cancellation(chat):
+    turn, cal = chat
+    await turn("book a call")
+    await turn("Book it for me here", DETAILS)
+    out = await turn("never mind, cancel", {"cancel": True})
+    assert "nothing new was booked" in out["answer"] and cal.cancelled == []
+
+
+async def test_asking_when_the_call_is_gets_an_answer_not_a_new_booking(chat):
+    turn, _ = chat
+    await book_one(turn)
+    await turn("30 min")
+    await turn("Yes, book it")
+    out = await turn("when is my appointment?", {"ask_existing": True})
+    assert "Your call with Duc-Anh is on" in out["answer"] and "Cancel that call" in out["choices"]
+
+
+async def test_at_the_limit_the_visitor_is_told_which_call_and_can_cancel_it(chat):
+    turn, cal = chat
+    await book_one(turn)
+    await turn("90 min")
+    await turn("Yes, book it")
+    await turn("book another call")
+    out = await turn(SLOTS[1]["label"])
+    assert "already hold 3" in out["answer"] and out["choices"] == ["Cancel that call"]
+    out = await turn("Cancel that call")
+    assert "To confirm: cancel your call" in out["answer"]
+    await turn("Yes, cancel it")
+    assert cal.cancelled == [("ann@example.com", START)]

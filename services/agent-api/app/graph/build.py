@@ -72,7 +72,8 @@ CLASSIFY = """You route messages for an assistant on Duc-Anh Nguyen's portfolio 
 Return compact single-line JSON: {"intent": ..., "search_query": ..., "complex": ..., "followup": ...}
 intent is one of:
 - "question": anything about Duc-Anh, his work, projects, skills, education, publications, contact
-- "booking": the visitor wants to meet, call or schedule time with him
+- "booking": the visitor wants to meet, call or schedule time with him, or to cancel, change or ask about
+  a call they booked
 - "message": the visitor wants to leave him a message or write to him through this chat
 - "smalltalk": greetings, thanks, what can you do
 - "off_topic": unrelated to Duc-Anh (general knowledge, coding help, other people)
@@ -234,7 +235,7 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         stage = b.get("stage")
         q = state["question"].strip()
         labels = {x["label"] for x in b.get("slots") or []}
-        chip = re.fullmatch(r"(30|60|90) min|Extend to (60|90) min|Book another time", q)
+        chip = re.fullmatch(r"(30|60|90) min|Extend to (60|90) min|Book another time|Cancel that call", q)
         if (chip and (stage or state.get("last_booking"))) or (
             stage in ("collecting", "choosing", "length") and (q.isdigit() or "@" in q or q in labels)
         ) or (
@@ -248,7 +249,8 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         note = f"\nA booking is in progress (stage: {stage})." if stage else ""
         if state.get("last_booking"):
             note += ("\nA call was just booked for this visitor in this chat. Messages about making it longer, "
-                     "changing its length, or booking another time are intent \"booking\".")
+                     "changing its length, cancelling it, asking when it is, or booking another time are intent "
+                     "\"booking\".")
         msgs = [{"role": "system", "content": CLASSIFY + topic_note + note}, *state.get("history", [])[-6:],
                 {"role": "user", "content": state["question"]}]
         try:
@@ -483,7 +485,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         "minutes (the length they ask for a NEW meeting: 30, 60 or 90, or null), extend_to_minutes (the TOTAL "
         "length in minutes they want for an EXISTING booked meeting, for example 60, 90 or 120, else null), "
         "cancel (true ONLY if they clearly say to stop, cancel or never mind; a complaint, a question or a "
-        "correction is NOT a cancel). Use null for "
+        "correction is NOT a cancel), ask_existing (true if they ask when their call is or whether they have one "
+        "booked). Use null for "
         "anything not stated. Never invent values. Answer with compact single-line JSON.\n"
         "Today is {today}, Europe/Berlin.\n"
         "Slots shown to the visitor: {slots}\n{known}"
@@ -535,8 +538,9 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         chip_extend = re.fullmatch(r"Extend to (60|90) min", qs)
         chip_len = re.fullmatch(r"(30|60|90) min", qs)
         again = qs == "Book another time"
-        f = bk.BookingFields()
-        if not (chip_extend or chip_len or again):
+        chip_cancel = qs == "Cancel that call"
+        f = bk.BookingFields(cancel=chip_cancel)
+        if not (chip_extend or chip_len or again or chip_cancel):
             known = SAME.format(**last) if last else ""
             today = dt.datetime.now(sl.TZ).strftime("%A %Y-%m-%d %H:%M")
             msgs = [{"role": "system", "content": EXTRACT.format(
@@ -559,7 +563,25 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         elif bk.YES.match(qs) or qs.lower().startswith("no") or chip_len or chip_extend:
             f.slot_choice = None
         if f.cancel:
-            return say("No problem, I've dropped the booking. Ask again any time.", booking={})
+            if b.get("stage") in ("collecting", "choosing", "length"):
+                # Nothing was created yet, so there is nothing to undo. Never imply a booked call was cancelled.
+                kept = f" Your call on {last['label']} is still booked." if last else ""
+                return say("No problem, I've stopped this booking; nothing new was booked." + kept, booking={})
+            if not last:
+                return say("There is no call from this chat to cancel. I can only cancel a call that I booked for you "
+                           f"here; for anything else please email {settings.contact_email}.", booking={})
+            text = f"To confirm: cancel your call with Duc-Anh on {last['label']}? This frees the time again."
+            out = say(text, ["Yes, cancel it", "No, keep it"], booking={
+                "mode": "cancel", "stage": "proposed", "name": last["name"], "email": last["email"],
+                "topic": last["topic"], "start": last["start"], "label": last["label"]})
+            out["history"] = [{"role": "user", "content": state["question"]}, {"role": "assistant", "content": text}]
+            return out
+        if f.ask_existing and b.get("stage") not in ("choosing", "length"):
+            if last:
+                return say(f"Your call with Duc-Anh is on {last['label']}, booked under {last['email']}.",
+                           ["Cancel that call", "Book another time"], booking={})
+            return say("I don't have a call booked for you in this chat. I only know about calls that I booked here; "
+                       f"for anything else please email {settings.contact_email}.", booking={})
 
         # ---- Extending a call that was booked earlier in this chat ----
         if f.extend_to_minutes and not b.get("stage") in ("choosing", "length"):
@@ -665,6 +687,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             except Exception:  # noqa: BLE001 - the booking step enforces the limit anyway
                 left = sl.MAX_SLOTS_PER_VISITOR
             if left < 1:
+                if last:
+                    return say(f"You already hold 3 half-hour slots with Duc-Anh (your call on {last['label']}), "
+                               "which is the most I can book for one person. You can cancel that call, or email "
+                               "him if you need more.", ["Cancel that call"], booking={})
                 return say("You already hold 3 half-hour slots with Duc-Anh, which is the most I can book "
                            "for one person. Email him if you need more.", booking={})
             cap = min(b["chosen"].get("max_slots", 1), left, sl.MAX_SLOTS_PER_VISITOR)
@@ -702,11 +728,30 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         write = get_stream_writer()
         b = state["booking"]
         if not state.get("confirmed"):
-            text = ("I didn't get a clear yes, so I haven't changed anything. "
+            text = ("OK, your call stays as it is." if b.get("mode") == "cancel" else
+                    "I didn't get a clear yes, so I haven't changed anything. "
                     "Say 'book a call' whenever you want to start again.")
             write({"type": "delta", "text": text})
             who = {k: b[k] for k in ("name", "email", "topic") if b.get(k)}
             return {"booking": {}, "answer": text, "choices": [], "visitor": who or state.get("visitor") or {}}
+        if b.get("mode") == "cancel":
+            try:
+                res = await calendar.cancel(b["email"], b["start"])
+            except Exception as e:  # noqa: BLE001
+                log.error("cancel_failed", error=str(e)[:200])
+                res = {"status": "failed"}
+            status = res["status"]
+            text = {
+                "cancelled": f"Done, your call on {b['label']} is cancelled and the time is free again.",
+                "not_found": "I couldn't find that call any more, so there is nothing left to cancel.",
+            }.get(status, f"I couldn't cancel it just now, so it is still booked. Please email {settings.contact_email}.")
+            log.info("booking_result", status=status, extending=False)
+            write({"type": "delta", "text": text})
+            out = {"booking": {}, "answer": text, "choices": [],
+                   "visitor": {k: b[k] for k in ("name", "email", "topic") if b.get(k)}}
+            if status in ("cancelled", "not_found"):
+                out["last_booking"] = {}  # the calendar no longer has it, so stop referring to it
+            return out
         extending = b.get("mode") == "extend"
         try:
             if extending:

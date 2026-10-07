@@ -122,6 +122,14 @@ class FakeCalendar:
                     return fake.store[eventId]
                 return Call(f)
 
+            def delete(self, calendarId, eventId):
+                def f():
+                    if eventId not in fake.store:
+                        raise http_error(404)
+                    fake.store[eventId] = {**fake.store[eventId], "status": "cancelled"}  # Google keeps the id
+                    return {}
+                return Call(f)
+
             def insert(self, calendarId, body):
                 def f():
                     fake.insert_calls += 1
@@ -295,3 +303,33 @@ def test_check_time_rejects_a_run_that_would_cross_the_wednesday_block(cal):
 def test_check_time_invalid_input(cal):
     assert json.loads(m.check_time("not-a-date"))["status"] == "invalid"
     assert json.loads(m.check_time(T.isoformat(), slots=4))["status"] == "invalid"
+
+
+# ---------------------------------------------------------------- cancelling a booked call
+
+def cancel(email="a@b.co", start=T):
+    return json.loads(m.cancel_booking(email, start.isoformat()))
+
+
+def test_cancelling_removes_the_event_and_gives_the_allowance_back(cal):
+    book(slots=3)
+    assert json.loads(m.get_allowance("a@b.co"))["remaining"] == 0
+    r = cancel()
+    assert r["status"] == "cancelled" and "10:00-11:30" in r["label"]
+    assert json.loads(m.get_allowance("a@b.co"))["remaining"] == 3
+    assert book(start=day(2026, 10, 8, 10))["status"] == "created"      # they can book again
+
+
+def test_cancel_is_idempotent_and_only_for_the_owner(cal):
+    book()
+    assert cancel(email="other@x.co")["status"] == "not_found"          # someone else's email cannot cancel it
+    assert cancel(start=day(2026, 10, 6, 15))["status"] == "not_found"  # no booking at that time
+    assert cancel()["status"] == "cancelled"
+    assert cancel()["status"] == "not_found"                             # already gone
+    assert cancel(email="nope")["status"] == "invalid"
+
+
+def test_a_cancelled_time_can_be_booked_again(cal):
+    book()
+    cancel()
+    assert book()["status"] == "created"

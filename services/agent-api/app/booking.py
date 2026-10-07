@@ -35,6 +35,7 @@ class BookingFields(BaseModel):
     minutes: int | None = None  # length asked for a new meeting: 30, 60 or 90
     extend_to_minutes: int | None = None  # 60 or 90 when they ask to lengthen an existing booked meeting
     cancel: bool | None = False  # models sometimes emit null
+    ask_existing: bool | None = False  # they ask when / whether they already have a call booked
 
 
 class LeaveFields(BaseModel):
@@ -139,6 +140,11 @@ class Calendar:
     async def extend(self, email: str, start: str, total_slots: int) -> dict:
         res = await self._call("extend_booking", {"email": email, "start": start, "total_slots": total_slots})
         await self._record("bookings", "extend", res["status"])  # type: ignore[index]
+        return res  # type: ignore[return-value]
+
+    async def cancel(self, email: str, start: str) -> dict:
+        res = await self._call("cancel_booking", {"email": email, "start": start})
+        await self._record("bookings", "cancel", res["status"])  # type: ignore[index]
         return res  # type: ignore[return-value]
 
     async def send_message(self, email: str, message: str, name: str = "") -> dict:

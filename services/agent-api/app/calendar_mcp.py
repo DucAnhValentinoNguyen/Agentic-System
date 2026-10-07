@@ -277,6 +277,27 @@ def extend_booking(email: str, start: str, total_slots: int) -> str:
 
 
 @mcp.tool()
+def cancel_booking(email: str, start: str) -> str:
+    """Cancel the visitor's own booking that starts at `start`. Only an event this assistant created for that email
+    can be cancelled. Idempotent. Returns JSON {status}: cancelled | not_found | invalid | failed."""
+    if not EMAIL.match(email):
+        return _out(status="invalid")
+    try:
+        start_dt = dt.datetime.fromisoformat(start)
+    except ValueError:
+        return _out(status="invalid")
+    svc = service()
+    e = _own_event(svc, email, start_dt)
+    if e is None:
+        return _out(status="not_found")
+    try:
+        svc.events().delete(calendarId="primary", eventId=e["id"]).execute()
+    except HttpError as err:
+        return _out(status="cancelled" if err.status_code in (404, 410) else "failed")
+    return _out(status="cancelled", label=sl.label(start_dt, _event_slots(e)))
+
+
+@mcp.tool()
 def send_message(sender_email: str, message: str, name: str = "") -> str:
     """Email a visitor's message to Duc-Anh. Returns JSON {status}: sent | invalid | failed."""
     message = "".join(ch for ch in message if ch == "\n" or ch >= " ").strip()
