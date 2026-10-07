@@ -8,6 +8,8 @@ from app.graph.build import build_graph
 from langgraph.types import Command
 
 START = "2026-10-06T10:00:00+02:00"
+DIRECT_FREE = "2026-10-08T15:00:00+02:00"
+DIRECT_BUSY = "2026-10-08T09:00:00+02:00"
 SLOTS = [{"start": START, "label": "Tue 06 Oct, 10:00 (Berlin time)", "max_slots": 3},
          {"start": "2026-10-07T12:30:00+02:00", "label": "Wed 07 Oct, 12:30 (Berlin time)", "max_slots": 2}]
 
@@ -49,6 +51,13 @@ class FakeCal:
         self.extended.append((email, start, total))
         self.held = total
         return {"status": "extended", "label": f"label x{total}", "slots": total, "remaining": 3 - self.held}
+
+    async def check_time(self, start, slots=1):
+        if start == DIRECT_FREE:
+            return {"status": "free", "label": "Thu 08 Oct, 15:00 (Berlin time)", "max_slots": 2}
+        if start == DIRECT_BUSY:
+            return {"status": "busy", "nearby": [SLOTS[0]]}
+        return {"status": "busy", "nearby": []}
 
 
 class NoRetriever:
@@ -170,3 +179,24 @@ async def test_nothing_is_changed_without_a_clear_yes(chat):
     await turn("30 min")
     out = await turn("hmm maybe later")
     assert cal.created == [] and "haven't changed anything" in out["answer"]
+
+
+async def test_a_visitor_typed_time_that_is_free_is_booked_directly(chat):
+    # "Thursday 3pm" never appears in the offered SLOTS list, but the backend checks it for real.
+    turn, cal = chat
+    await turn("book a call")
+    out = await turn("Book it for me here", {**DETAILS, "requested_start": DIRECT_FREE})
+    assert out["choices"] == ["30 min", "60 min"]                           # check_time's own max_slots, not a chip
+    out = await turn("30 min")
+    assert out["choices"] == ["Yes, book it", "No, cancel"]
+    out = await turn("Yes, book it")
+    assert cal.created == [("Ann", "ann@example.com", "internship", DIRECT_FREE, 1)]
+
+
+async def test_a_visitor_typed_time_that_is_taken_offers_nearby_times(chat):
+    turn, _ = chat
+    await turn("book a call")
+    out = await turn("Book it for me here", {**DETAILS, "requested_start": DIRECT_BUSY})
+    assert "isn't available" in out["answer"] and out["choices"] == [SLOTS[0]["label"]]
+    out = await turn(SLOTS[0]["label"])                                    # still bookable from the fallback list
+    assert out["choices"] == ["30 min", "60 min", "90 min"]

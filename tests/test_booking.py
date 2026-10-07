@@ -270,3 +270,28 @@ def test_a_day_whose_first_free_slot_is_after_14_is_not_listed_twice(cal, monkey
     assert len(starts_) == len(set(starts_))                                       # no repeats
     assert starts_.count(day(2026, 10, 6, 14).isoformat()) == 1                    # Tuesday 14:00 listed exactly once
     assert all(1 <= o["max_slots"] <= 3 for o in offered)
+
+
+# ---------------------------------------------------------------- checking a visitor-typed time directly
+
+def test_check_time_reports_free_with_how_long_it_could_run(cal):
+    r = json.loads(m.check_time(T.isoformat()))
+    assert r["status"] == "free" and r["max_slots"] == 3
+
+
+def test_check_time_on_a_taken_slot_offers_nearby_free_times(cal, monkeypatch):
+    monkeypatch.setattr(m, "_free", lambda: [t for t in ALL if t != T])    # exactly the requested time is gone
+    r = json.loads(m.check_time(T.isoformat()))
+    assert r["status"] == "busy" and len(r["nearby"]) <= 4
+    assert all(x["start"] != T.isoformat() for x in r["nearby"])
+
+
+def test_check_time_rejects_a_run_that_would_cross_the_wednesday_block(cal):
+    wed_1230 = day(2026, 10, 7, 12, 30)
+    r = json.loads(m.check_time(wed_1230.isoformat(), slots=2))            # would run into the 13:00 block
+    assert r["status"] == "busy"
+
+
+def test_check_time_invalid_input(cal):
+    assert json.loads(m.check_time("not-a-date"))["status"] == "invalid"
+    assert json.loads(m.check_time(T.isoformat(), slots=4))["status"] == "invalid"

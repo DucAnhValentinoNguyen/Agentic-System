@@ -128,6 +128,27 @@ def get_free_slots() -> str:
 
 
 @mcp.tool()
+def check_time(start: str, slots: int = 1) -> str:
+    """Check whether `slots` consecutive 30-minute slots starting at `start` (ISO 8601, Europe/Berlin) are
+    bookable right now. Returns JSON: {status: "free", label, max_slots} when it is, or {status: "busy",
+    nearby: [{start, label, max_slots}, ...]} with up to 4 free times close to the request when it is not
+    (outside the work window, within the notice period, or already taken). {status: "invalid"} for bad input."""
+    try:
+        start_dt = dt.datetime.fromisoformat(start)
+    except ValueError:
+        return _out(status="invalid")
+    if not 1 <= slots <= sl.MAX_SLOTS_PER_VISITOR:
+        return _out(status="invalid")
+    free = set(_free())
+    if sl.run_ok(free, start_dt, slots):
+        return _out(status="free", label=sl.label(start_dt, slots), max_slots=sl.max_run(free, start_dt))
+    nearby = sorted(free, key=lambda t: abs((t - start_dt).total_seconds()))[:4]
+    nearby.sort()
+    return _out(status="busy", nearby=[
+        {"start": t.isoformat(), "label": sl.label(t), "max_slots": sl.max_run(free, t)} for t in nearby])
+
+
+@mcp.tool()
 def get_allowance(email: str) -> str:
     """How many of the visitor's 3 half-hour slots are still available. Returns JSON {held, remaining}."""
     if not EMAIL.match(email):
