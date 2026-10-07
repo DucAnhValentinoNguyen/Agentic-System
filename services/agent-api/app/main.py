@@ -16,7 +16,7 @@ from langfuse.langchain import CallbackHandler
 from langgraph.types import Command
 from pydantic import BaseModel, Field, ValidationError
 
-from . import stt
+from . import cancel, stt
 from .booking import Calendar
 from .checkpoint import FirestoreSaver
 from .config import settings
@@ -75,7 +75,8 @@ async def lifespan(app: FastAPI):
     saver = (FirestoreSaver(app.state.store.db())
              if settings.session_store == "firestore" and app.state.store.enabled else None)
     app.state.durability = "exit" if saver else "async"  # one Firestore write per turn instead of one per step
-    app.state.graph = build_graph(router, retriever, Calendar(app.state.store),
+    app.state.calendar = Calendar(app.state.store)
+    app.state.graph = build_graph(router, retriever, app.state.calendar,
                                   topics=site_topics([c["title"] for c in index.chunks]), checkpointer=saver)
     app.state.hits = defaultdict(deque)   # ip -> recent turn timestamps
     app.state.turns = defaultdict(int)    # session -> turn count
@@ -102,6 +103,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Twin agent-api", lifespan=lifespan)
+app.include_router(cancel.make_router(
+    lambda: app.state.calendar, lambda: settings.cancel_secret,
+    lambda request: ip_limited("cancel:" + client_ip_http(request), 20)))
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["*"],
                    allow_headers=["*"])
 
@@ -174,6 +178,11 @@ def ip_limited(ip: str, per_minute: int) -> bool:
         return True
     q.append(now)
     return False
+
+
+def client_ip_http(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return fwd or (request.client.host if request.client else "?")
 
 
 def rate_limited(ws: WebSocket) -> bool:

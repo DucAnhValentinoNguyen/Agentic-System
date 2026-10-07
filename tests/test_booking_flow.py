@@ -343,3 +343,29 @@ def test_the_appointment_question_pattern_does_not_swallow_booking_requests():
         assert ASK_EXISTING.search(q), q
     for q in ("when can I book a call?", "book a call", "How do I schedule a meeting with him?", "when is he free"):
         assert not ASK_EXISTING.search(q), q
+
+
+async def test_a_confirmed_booking_comes_with_a_cancel_link_for_exactly_that_booking(chat, monkeypatch):
+    from app import cancel as cx
+    from app.config import settings
+    monkeypatch.setattr(settings, "cancel_secret", "test-secret")
+    monkeypatch.setattr(settings, "public_api_url", "https://api.example")
+    turn, _ = chat
+    await book_one(turn)
+    await turn("30 min")
+    out = await turn("Yes, book it")
+    (link,) = out["links"]
+    assert link["label"] == "Cancel this call" and link["url"].startswith("https://api.example/v1/cancel?t=")
+    token = link["url"].split("t=")[1]
+    assert cx.verify(token, "test-secret") == cx.event_id("ann@example.com", START)
+    assert link["until"].startswith("2026-10-06T10:30:00")                      # the call ends 30 minutes after 10:00
+
+
+async def test_no_cancel_link_when_no_secret_is_configured(chat, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "cancel_secret", "")
+    turn, _ = chat
+    await book_one(turn)
+    await turn("30 min")
+    out = await turn("Yes, book it")
+    assert not out.get("links")

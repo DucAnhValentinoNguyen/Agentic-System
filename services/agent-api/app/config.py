@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     rerank: str = "off"  # "llm": retrieve rerank_candidates passages, keep only those that help answer (see docs/experiment.md)
     rerank_candidates: int = 10  # the retrieval service returns at most 10
     rerank_keep: int = 5
+    public_api_url: str = ""  # base URL of this service, used in cancel links
+    cancel_secret: str = ""  # signs cancel links; empty turns the links off
     daily_turns_per_ip: int = 150  # per network address and day, persisted (the per-chat cap resets with a new chat)
     fault_inject: str = ""  # e.g. "vertex_429" — fault-injection exercises only
 

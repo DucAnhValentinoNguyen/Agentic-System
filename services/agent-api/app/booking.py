@@ -147,6 +147,14 @@ class Calendar:
         await self._record("bookings", "cancel", res["status"])  # type: ignore[index]
         return res  # type: ignore[return-value]
 
+    async def booking_info(self, event_id: str) -> dict:
+        return await self._call("booking_info", {"event_id": event_id})  # type: ignore[return-value]
+
+    async def cancel_id(self, event_id: str) -> dict:
+        res = await self._call("cancel_by_id", {"event_id": event_id})
+        await self._record("bookings", "cancel_link", res["status"])  # type: ignore[index]
+        return res  # type: ignore[return-value]
+
     async def send_message(self, email: str, message: str, name: str = "", kind: str = "",
                            reference: str = "") -> dict:
         key = hashlib.sha256(f"{email.lower()}|{message}".encode()).hexdigest()

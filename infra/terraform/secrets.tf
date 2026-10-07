@@ -13,8 +13,15 @@ variable "google_calendar_token" {
   default   = ""
 }
 
+# Signs the cancel links. Generated once; never changes unless replaced on purpose (that would void issued links).
+resource "random_password" "cancel_secret" {
+  length  = 48
+  special = false
+}
+
 locals {
   secrets = {
+    CANCEL_SECRET         = random_password.cancel_secret.result
     GROQ_API_KEY          = var.groq_api_key
     LANGFUSE_PUBLIC_KEY   = var.langfuse_public_key
     LANGFUSE_SECRET_KEY   = var.langfuse_secret_key

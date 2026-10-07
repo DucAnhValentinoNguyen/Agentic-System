@@ -80,7 +80,7 @@ resource "google_cloud_run_v2_job" "judge" {
           value = "6"
         }
         dynamic "env" {
-          for_each = { for k, v in google_secret_manager_secret.s : k => v if k != "GOOGLE_CALENDAR_TOKEN" }
+          for_each = { for k, v in google_secret_manager_secret.s : k => v if !contains(["GOOGLE_CALENDAR_TOKEN", "CANCEL_SECRET"], k) }
           content {
             name = env.key
             value_source {

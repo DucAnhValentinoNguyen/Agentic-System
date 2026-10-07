@@ -7,7 +7,7 @@ type ServerEvent =
   | { type: "node"; node: string; turn_id: string }
   | { type: "step"; text: string; turn_id: string }
   | { type: "transcript"; text: string; turn_id: string }
-  | { type: "done"; turn_id: string; trace_id?: string; text: string; citations: Citation[]; degraded: boolean; choices?: string[]; links?: { label: string; url: string }[] }
+  | { type: "done"; turn_id: string; trace_id?: string; text: string; citations: Citation[]; degraded: boolean; choices?: string[]; links?: { label: string; url: string; note?: string; until?: string }[] }
   | { type: "error"; code: string; text: string; turn_id?: string };
 
 const script = document.currentScript as HTMLScriptElement | null;
@@ -125,7 +125,7 @@ function mount(): void {
     <button class="resize" data-edge="nw" type="button" aria-label="Resize chat. Drag any edge or corner, or use the arrow keys on this corner." title="Drag to resize; arrow keys also work">↖</button>
     <div class="rz rz-n" data-edge="n"></div><div class="rz rz-s" data-edge="s"></div><div class="rz rz-e" data-edge="e"></div><div class="rz rz-w" data-edge="w"></div><div class="rz rz-ne" data-edge="ne"></div><div class="rz rz-sw" data-edge="sw"></div><div class="rz rz-se" data-edge="se"></div>
     <div class="head">Duc-Anh's twin<button class="expand" type="button" aria-label="Expand chat" title="Expand chat">⛶</button><button class="close" type="button" aria-label="Close chat">×</button><button class="mute" type="button" aria-label="Mute notification sound" title="Mute notification sound"></button><small>Answers come from this site, with links to the source section.</small><span class="connection" role="status"></span></div>
-    <div class="report-bar"><button class="report" type="button" title="Tell Duc-Anh that the chatbot did something wrong">⚠ Report an issue with this chatbot to Duc-Anh</button></div>
+    <div class="report-bar"><button class="report" type="button" title="Tell Duc-Anh that the chatbot did something wrong">⚠ Report an issue with this chatbot to Duc-Anh</button> <button class="report mycall" type="button" hidden title="Opens the page where you can cancel this call"></button></div>
     <div class="log" aria-live="polite"></div>
     <div class="note">An AI assistant. Messages are logged to improve it; don't share private data. Voice is transcribed on our server and not stored.</div>
     <div class="credit">Made with ❤️ by Đức Anh Valentino Nguyễn</div>
@@ -143,6 +143,7 @@ function mount(): void {
   const mic = root.querySelector(".mic") as HTMLButtonElement;
   const voiceStatus = root.querySelector(".voice-status") as HTMLDivElement;
   const connection = root.querySelector(".connection") as HTMLSpanElement;
+  let rememberBooking: (l: { url: string; note?: string; until?: string }) => void = () => {};
   const sid = sessionId();
 
   // Wake the API while the visitor reads. This never blocks mounting the UI
@@ -203,7 +204,7 @@ function mount(): void {
     text: string,
     cites: Citation[],
     choices: string[] = [],
-    links: { label: string; url: string }[] = [],
+    links: { label: string; url: string; note?: string; until?: string }[] = [],
     traceId?: string,
   ): void => {
     if (!pending) return;
@@ -235,6 +236,7 @@ function mount(): void {
         a.rel = "noopener noreferrer";
         a.textContent = "\u2197 " + l.label;
         row.appendChild(a);
+        if (l.label === "Cancel this call" && l.until) rememberBooking(l);
       }
       el.appendChild(row);
     }
@@ -635,6 +637,22 @@ function mount(): void {
 
   const resize = root.querySelector(".resize") as HTMLButtonElement;
   const expand = root.querySelector(".expand") as HTMLButtonElement;
+  // A booked call is remembered in this browser (only the cancel link and the time), so the same device can cancel it
+  // later without a login. The page the link opens is the only thing that can cancel; it asks for one more click.
+  const mycall = root.querySelector(".mycall") as HTMLButtonElement;
+  const showBooking = (): void => {
+    let b: { url: string; note: string; until: string } | null = null;
+    try { b = JSON.parse(store.get("twin-booking", localStorage) || "null"); } catch { b = null; }
+    if (!b || !b.url || !(Date.parse(b.until) > Date.now())) { mycall.hidden = true; return; }
+    mycall.textContent = "\ud83d\udcc5 My call: " + b.note.replace(" (Berlin time)", "") + " \u00b7 cancel";
+    mycall.onclick = () => window.open(b!.url, "_blank", "noopener,noreferrer");
+    mycall.hidden = false;
+  };
+  rememberBooking = (l) => {
+    store.set("twin-booking", JSON.stringify({ url: l.url, note: l.note || "", until: l.until }), localStorage);
+    showBooking();
+  };
+  showBooking();
   // Always visible, unlike the example chips: one tap starts a problem report that is emailed to Duc-Anh.
   (root.querySelector(".report") as HTMLButtonElement).onclick = () => ask("Report an issue with this chatbot to Duc-Anh");
   const paintExpand = (): void => {

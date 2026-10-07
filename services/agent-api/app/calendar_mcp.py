@@ -10,7 +10,6 @@ reconciled instead of creating a second event. A visitor (identified by email) c
 
 import base64
 import datetime as dt
-import hashlib
 import json
 import os
 import re
@@ -24,6 +23,7 @@ from googleapiclient.errors import HttpError
 from mcp.server.fastmcp import FastMCP
 
 from . import slots as sl
+from .cancel import event_id  # shared with the cancel links: one id scheme
 
 TZ = sl.TZ
 EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,}$")
@@ -82,8 +82,6 @@ def _free() -> list[dt.datetime]:
     return sl.free_slots(_busy(now, now + dt.timedelta(days=sl.RULES.horizon_days + 1)), now)
 
 
-def event_id(email: str, start_iso: str) -> str:
-    return hashlib.sha1(f"{email.lower()}|{start_iso}".encode()).hexdigest()[:32]  # a-f0-9
 
 
 def _event_slots(e: dict) -> int:
@@ -225,6 +223,44 @@ def _own_event(svc, email: str, start_dt: dt.datetime):
     if e.get("status") == "cancelled" or props.get("twin_email") != email.lower():
         return None
     return e
+
+
+def _twin_event(svc, event_id_: str):
+    """The event with this id if this assistant created it (it carries the private twin_email property), else None."""
+    if not re.fullmatch(r"[a-f0-9]{32}", event_id_):
+        return None
+    try:
+        e = svc.events().get(calendarId="primary", eventId=event_id_).execute()
+    except HttpError:
+        return None
+    return e if (e.get("extendedProperties") or {}).get("private", {}).get("twin_email") else None
+
+
+@mcp.tool()
+def booking_info(event_id: str) -> str:
+    """Describe a booking made by this assistant, by its event id. Returns JSON {status: ok|cancelled|not_found, label}."""
+    e = _twin_event(service(), event_id)
+    if e is None:
+        return _out(status="not_found")
+    start = dt.datetime.fromisoformat(e["start"]["dateTime"])
+    label = sl.label(start, _event_slots(e))
+    return _out(status="cancelled" if e.get("status") == "cancelled" else "ok", label=label, start=start.isoformat())
+
+
+@mcp.tool()
+def cancel_by_id(event_id: str) -> str:
+    """Cancel a booking made by this assistant, by its event id. Idempotent. Returns JSON {status}."""
+    svc = service()
+    e = _twin_event(svc, event_id)
+    if e is None:
+        return _out(status="not_found")
+    if e.get("status") == "cancelled":
+        return _out(status="already_cancelled")
+    try:
+        svc.events().delete(calendarId="primary", eventId=event_id).execute()
+    except HttpError as err:
+        return _out(status="cancelled" if err.status_code in (404, 410) else "failed")
+    return _out(status="cancelled")
 
 
 @mcp.tool()

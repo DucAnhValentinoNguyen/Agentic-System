@@ -14,6 +14,7 @@ from langgraph.types import Send, interrupt
 from pydantic import BaseModel, ValidationError
 
 from .. import booking as bk
+from .. import cancel as cx
 from .. import slots as sl
 from ..config import settings
 from ..gateway.router import CallRecord, ProviderError, Router
@@ -821,6 +822,13 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                      "visitor": {k: b[k] for k in ("name", "email", "topic") if b.get(k)}}
         if status in ("created", "extended", "already_created", "already_extended"):
             start = b["start"] if extending else b["chosen"]["start"]
+            if settings.cancel_secret and settings.public_api_url:
+                start_dt = dt.datetime.fromisoformat(start)
+                out["links"] = [{
+                    "label": "Cancel this call", "note": label,
+                    "until": (start_dt + sl.SLOT * n).isoformat(),
+                    "url": cx.link(cx.event_id(b["email"], start_dt.isoformat()), settings.cancel_secret,
+                                   settings.public_api_url)}]
             out["last_booking"] = {"name": b["name"], "email": b["email"], "topic": b["topic"],
                                    "start": start, "slots": n, "label": label}
             if status in ("created", "extended") and remaining > 0:

@@ -2,6 +2,7 @@ terraform {
   required_version = ">= 1.5"
   required_providers {
     google = { source = "hashicorp/google", version = "~> 6.0" }
+    random = { source = "hashicorp/random", version = "~> 3.6" }
   }
   backend "gcs" {
     bucket = "agentsystems-510414-tfstate"
@@ -14,8 +15,9 @@ variable "region" { default = "europe-west3" }
 variable "daily_budget_usd" { default = 2 }
 variable "monthly_budget_usd" { default = 12 }
 variable "daily_turns_per_ip" { default = 150 }
-variable "session_store" { default = "firestore" } # "memory" keeps a chat in one process (then max_instances must be 1)
-variable "max_instances" { default = 3 }           # spend is capped by the shared budgets, not by this number
+variable "public_api_url" { default = "https://twin-agent-api-7yjacf5bma-ey.a.run.app" } # base of the cancel links
+variable "session_store" { default = "firestore" }                                       # "memory" keeps a chat in one process (then max_instances must be 1)
+variable "max_instances" { default = 3 }                                                 # spend is capped by the shared budgets, not by this number
 variable "image_tag" { description = "Image tag to deploy (git sha)" }
 variable "alert_email" { description = "Where alerts and budget emails go (set ALERT_EMAIL in .env)" }
 variable "fault_inject" { default = "" }
@@ -140,6 +142,10 @@ resource "google_cloud_run_v2_service" "agent" {
       env {
         name  = "DAILY_TURNS_PER_IP"
         value = tostring(var.daily_turns_per_ip)
+      }
+      env {
+        name  = "PUBLIC_API_URL"
+        value = var.public_api_url
       }
       env {
         name  = "SESSION_STORE"
