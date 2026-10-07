@@ -322,9 +322,9 @@ async def run_turn(ws: WebSocket, msg: UserMsg, voice: bool = False) -> None:
 async def _stream_graph(ws: WebSocket, msg: UserMsg, cfg: dict, final: dict) -> None:
     snap = await app.state.graph.aget_state(cfg)
     if snap.next:  # paused at the booking confirmation: this message is the visitor's answer
-        graph_input = Command(resume=msg.text, update={"question": msg.text})
+        graph_input = Command(resume=msg.text, update={"question": msg.text, "session_id": msg.session_id})
     else:
-        graph_input = {"question": msg.text, "records": [],
+        graph_input = {"question": msg.text, "records": [], "session_id": msg.session_id,
                        "variant": assign_variant(msg.session_id)}
     async for mode, ev in app.state.graph.astream(
         graph_input, cfg, stream_mode=["custom", "updates"]

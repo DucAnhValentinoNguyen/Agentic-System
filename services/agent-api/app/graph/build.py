@@ -59,6 +59,7 @@ class State(TypedDict, total=False):
     verify: dict
     booking: dict
     last_booking: dict
+    session_id: str
     visitor: dict  # name, email, topic given in this chat; survives a cancelled or declined booking
     leave: dict
     messages_sent: int
@@ -243,6 +244,8 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         ):
             # Unambiguous follow-ups to an active booking skip the classifier entirely.
             return {"intent": "booking", "search_query": "", "records": []}
+        if q == REPORT_ISSUE:
+            return {"intent": "message", "search_query": "", "records": []}
         if (state.get("leave") or {}).get("stage") == "collecting":
             # Free text (the message itself) must not be re-classified while we are collecting it.
             return {"intent": "message", "search_query": "", "records": []}
@@ -793,6 +796,9 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
     return {"book_collect": book_collect, "book_confirm": book_confirm, "book_create": book_create}
 
 
+REPORT_ISSUE = "Report an issue with this chatbot to Duc-Anh"  # sent by the always-visible button in the widget
+
+
 def make_message_nodes(router: Router, calendar: bk.Calendar):
     EXTRACT = (
         "Extract from the conversation what a visitor wants to send to Duc-Anh. Return JSON with keys "
@@ -813,6 +819,17 @@ def make_message_nodes(router: Router, calendar: bk.Calendar):
         qs = state["question"].strip()
         recs: list[CallRecord] = []
         f = bk.LeaveFields()
+        if qs == REPORT_ISSUE:
+            # Start (or restart) a problem report. An email already given in this chat is reused.
+            known = (state.get("visitor") or {}).get("email") or l.get("email")
+            l = {"kind": "issue", "stage": "collecting", **({"email": known} if known else {})}
+            need = "what went wrong" if known else "your email address (so Duc-Anh can reply) and what went wrong"
+            text = (f"Sorry about that. Please tell me {need}. I'll add this chat's reference so Duc-Anh can look "
+                    "at the conversation.")
+            write({"type": "delta", "text": text})
+            write({"type": "choices", "options": ["Cancel"]})
+            return {"leave": l, "answer": text, "choices": ["Cancel"], "confirmed": None, "records": recs}
+        issue = l.get("kind") == "issue"
         if qs.lower() in ("cancel", "no", "no, cancel", "never mind", "nevermind"):
             f.cancel = True
         else:
@@ -838,14 +855,19 @@ def make_message_nodes(router: Router, calendar: bk.Calendar):
             choices = ["Cancel"]
         elif not l.get("email") or not l.get("message"):
             l["stage"] = "collecting"
-            need = {(True, True): "your email address (so Duc-Anh can reply) and your message",
+            what = "what went wrong" if issue else "your message"
+            need = {(True, True): f"your email address (so Duc-Anh can reply) and {what}",
                     (True, False): "your email address, so Duc-Anh can reply",
-                    (False, True): "the message you'd like to send"}[(not l.get("email"), not l.get("message"))]
-            text = f"Sure, I can pass a message to Duc-Anh. Please tell me {need}."
+                    (False, True): what if issue else "the message you'd like to send"}[
+                        (not l.get("email"), not l.get("message"))]
+            text = (f"Thanks. Please tell me {need}." if issue else
+                    f"Sure, I can pass a message to Duc-Anh. Please tell me {need}.")
             choices = ["Cancel"]
         else:
             l["stage"] = "proposed"
-            text = (f"Here's what I'll send to Duc-Anh:\n\n\u201c{l['message']}\u201d\n\n"
+            lead = ("Here's the issue report I'll send to Duc-Anh, with this chat's reference"
+                    if issue else "Here's what I'll send to Duc-Anh")
+            text = (f"{lead}:\n\n\u201c{l['message']}\u201d\n\n"
                     f"Reply-to: {l['email']}. Shall I send it?")
             choices = ["Yes, send it", "No, cancel"]
         write({"type": "delta", "text": text})
@@ -868,13 +890,18 @@ def make_message_nodes(router: Router, calendar: bk.Calendar):
             write({"type": "delta", "text": text})
             return {"leave": {}, "answer": text, "choices": []}
         try:
-            res = await calendar.send_message(l["email"], l["message"], l.get("name", ""))
+            issue = l.get("kind") == "issue"
+            res = await calendar.send_message(l["email"], l["message"], l.get("name", ""),
+                                              kind="issue" if issue else "",
+                                              reference=state.get("session_id", "") if issue else "")
         except Exception as e:  # noqa: BLE001
             log.error("message_failed", error=str(e)[:200])
             res = {"status": "failed"}
         log.info("message_result", status=res["status"])
         text = {
-            "sent": "Done, I've sent your message to Duc-Anh. He'll reply to " + l["email"] + ".",
+            "sent": ("Thank you, the report is on its way to Duc-Anh. He'll reply to " + l["email"] + "."
+                     if l.get("kind") == "issue" else
+                     "Done, I've sent your message to Duc-Anh. He'll reply to " + l["email"] + "."),
             "already_sent": "That exact message was already sent, so I haven't sent it again.",
             "daily_cap": f"Too many messages today. Please email {settings.contact_email} directly.",
         }.get(res["status"], f"I couldn't send it. Please email {settings.contact_email} directly.")

@@ -59,6 +59,9 @@ const STYLE = `
 .cite{text-decoration:none;display:inline-block}
 .cite:hover{background:#1a1a1a;color:#fff}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
+.report-bar{flex-shrink:0;padding:6px 14px;border-bottom:1px solid #e6e6e6;background:#fafafa}
+.report{border:1px solid #bbb;border-radius:999px;padding:3px 10px;background:#fff;color:#1a1a1a;font:inherit;font-size:12px;cursor:pointer}
+.report:hover{background:#1a1a1a;color:#fff}
 .fb{margin-top:6px;font-size:12px;color:#777}
 .thumb{border:0;background:transparent;cursor:pointer;font-size:15px;padding:0 6px 0 0;opacity:.7}
 .thumb:hover{opacity:1}
@@ -122,6 +125,7 @@ function mount(): void {
     <button class="resize" data-edge="nw" type="button" aria-label="Resize chat. Drag any edge or corner, or use the arrow keys on this corner." title="Drag to resize; arrow keys also work">↖</button>
     <div class="rz rz-n" data-edge="n"></div><div class="rz rz-s" data-edge="s"></div><div class="rz rz-e" data-edge="e"></div><div class="rz rz-w" data-edge="w"></div><div class="rz rz-ne" data-edge="ne"></div><div class="rz rz-sw" data-edge="sw"></div><div class="rz rz-se" data-edge="se"></div>
     <div class="head">Duc-Anh's twin<button class="expand" type="button" aria-label="Expand chat" title="Expand chat">⛶</button><button class="close" type="button" aria-label="Close chat">×</button><button class="mute" type="button" aria-label="Mute notification sound" title="Mute notification sound"></button><small>Answers come from this site, with links to the source section.</small><span class="connection" role="status"></span></div>
+    <div class="report-bar"><button class="report" type="button" title="Tell Duc-Anh that the chatbot did something wrong">⚠ Report an issue with this chatbot to Duc-Anh</button></div>
     <div class="log" aria-live="polite"></div>
     <div class="note">An AI assistant. Messages are logged to improve it; don't share private data. Voice is transcribed on our server and not stored.</div>
     <div class="credit">Made with ❤️ by Đức Anh Valentino Nguyễn</div>
@@ -631,6 +635,8 @@ function mount(): void {
 
   const resize = root.querySelector(".resize") as HTMLButtonElement;
   const expand = root.querySelector(".expand") as HTMLButtonElement;
+  // Always visible, unlike the example chips: one tap starts a problem report that is emailed to Duc-Anh.
+  (root.querySelector(".report") as HTMLButtonElement).onclick = () => ask("Report an issue with this chatbot to Duc-Anh");
   const paintExpand = (): void => {
     expand.title = expanded ? "Restore chat size" : "Expand chat";
     expand.setAttribute("aria-label", expand.title);

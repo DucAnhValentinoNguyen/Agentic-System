@@ -298,8 +298,9 @@ def cancel_booking(email: str, start: str) -> str:
 
 
 @mcp.tool()
-def send_message(sender_email: str, message: str, name: str = "") -> str:
-    """Email a visitor's message to Duc-Anh. Returns JSON {status}: sent | invalid | failed."""
+def send_message(sender_email: str, message: str, name: str = "", kind: str = "", reference: str = "") -> str:
+    """Email a visitor's message to Duc-Anh. kind="issue" marks a problem report about the assistant; `reference`
+    is the chat's session id so the conversation can be looked up. Returns JSON {status}: sent | invalid | failed."""
     message = "".join(ch for ch in message if ch == "\n" or ch >= " ").strip()
     if not EMAIL.match(sender_email) or not 1 <= len(message) <= 2000:
         return json.dumps({"status": "invalid"})
@@ -307,11 +308,15 @@ def send_message(sender_email: str, message: str, name: str = "") -> str:
     mail = EmailMessage()
     mail["To"] = OWNER_EMAIL
     mail["Reply-To"] = sender_email  # validated: no whitespace or newlines, so no header injection
-    mail["Subject"] = f"[Twin] Message from {sender_email}"
+    issue = kind == "issue"
+    reference = re.sub(r"[^A-Za-z0-9_-]", "", reference)[:64]
+    mail["Subject"] = f"[Twin issue] Report from {sender_email}" if issue else f"[Twin] Message from {sender_email}"
+    intro = ("A visitor reported a problem with the assistant on ducanhvalentinonguyen.com.\n" if issue else
+             "A visitor left you a message through the assistant on ducanhvalentinonguyen.com.\n")
+    ref = f"Chat reference (session id, to find the conversation in the logs): {reference}\n" if reference else ""
     mail.set_content(
-        "A visitor left you a message through the assistant on ducanhvalentinonguyen.com.\n"
-        f"From: {name + ' ' if name else ''}<{sender_email}> (typed by the visitor, not verified)\n"
-        "Reply to this email to answer them.\n\n---\n" + message + "\n")
+        intro + f"From: {name + ' ' if name else ''}<{sender_email}> (typed by the visitor, not verified)\n"
+        + ref + "Reply to this email to answer them.\n\n---\n" + message + "\n")
     try:
         raw = base64.urlsafe_b64encode(mail.as_bytes()).decode()
         gmail_service().users().messages().send(userId="me", body={"raw": raw}).execute()

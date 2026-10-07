@@ -147,13 +147,15 @@ class Calendar:
         await self._record("bookings", "cancel", res["status"])  # type: ignore[index]
         return res  # type: ignore[return-value]
 
-    async def send_message(self, email: str, message: str, name: str = "") -> dict:
+    async def send_message(self, email: str, message: str, name: str = "", kind: str = "",
+                           reference: str = "") -> dict:
         key = hashlib.sha256(f"{email.lower()}|{message}".encode()).hexdigest()
         if key in self.sent_hashes:
             return {"status": "already_sent"}
         if await self._today("messages") >= MAX_MESSAGES_PER_DAY:
             return {"status": "daily_cap"}
-        res = await self._call("send_message", {"sender_email": email, "message": message, "name": name})
+        res = await self._call("send_message", {"sender_email": email, "message": message, "name": name,
+                                                "kind": kind, "reference": reference})
         if res["status"] == "sent":  # type: ignore[index]
             self.sent_hashes.add(key)
         await self._record("messages", "message", res["status"])  # type: ignore[index]

@@ -93,3 +93,15 @@ async def test_daily_cap_is_durable_when_store_has_a_count():
     cal._call = lambda *a, **k: None
     # the in-memory count is 0 (fresh process after a restart) but the durable count says 20
     assert (await cal.send_message("a@b.co", "hi"))["status"] == "daily_cap"
+
+
+def test_an_issue_report_is_marked_and_carries_the_chat_reference(monkeypatch):
+    g = FakeGmail()
+    monkeypatch.setattr(m, "gmail_service", lambda: g)
+    res = json.loads(m.send_message("v@example.com", "It said cancelled but it was not.", kind="issue",
+                                    reference="abc123\nBcc: x@evil.test"))
+    assert res["status"] == "sent"
+    msg = g.sent[0]
+    assert msg["Subject"] == "[Twin issue] Report from v@example.com" and msg["Bcc"] is None
+    body = msg.get_payload(decode=True).decode()
+    assert "reported a problem" in body and "abc123Bccxeviltest" in body      # reference reduced to safe characters

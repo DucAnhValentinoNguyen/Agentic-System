@@ -18,12 +18,14 @@ class ScriptedRouter:
     """Answers the classifier like a real one and the extractor from a per-turn script."""
 
     def __init__(self):
-        self.extract = {}
+        self.extract, self.leave = {}, {}
 
     async def complete(self, tier, messages, records, **kw):
         system = messages[0]["content"]
         if "Extract booking details" in system:
             return json.dumps(self.extract)
+        if "what a visitor wants to send" in system:
+            return json.dumps(self.leave)
         return json.dumps({"intent": "booking", "search_query": "", "complex": False, "followup": False})
 
 
@@ -52,6 +54,10 @@ class FakeCal:
         self.held = total
         return {"status": "extended", "label": f"label x{total}", "slots": total, "remaining": 3 - self.held}
 
+    async def send_message(self, email, message, name="", kind="", reference=""):
+        self.sent = (email, message, kind, reference)
+        return {"status": "sent"}
+
     async def cancel(self, email, start):
         self.cancelled.append((email, start))
         self.held = 0
@@ -76,10 +82,11 @@ def chat():
     graph = build_graph(router, NoRetriever(), cal)
     cfg = {"configurable": {"thread_id": uuid.uuid4().hex}}
 
-    async def turn(text, extract=None):
-        router.extract = extract or {}
+    async def turn(text, extract=None, leave=None):
+        router.extract, router.leave = extract or {}, leave or {}
         snap = await graph.aget_state(cfg)
-        inp = Command(resume=text, update={"question": text}) if snap.next else {"question": text, "records": []}
+        inp = (Command(resume=text, update={"question": text}) if snap.next
+               else {"question": text, "records": [], "session_id": "sess-42"})
         final = {}
         async for mode, ev in graph.astream(inp, cfg, stream_mode=["custom", "updates"]):
             if mode == "updates":
@@ -291,3 +298,29 @@ async def test_at_the_limit_the_visitor_is_told_which_call_and_can_cancel_it(cha
     assert "To confirm: cancel your call" in out["answer"]
     await turn("Yes, cancel it")
     assert cal.cancelled == [("ann@example.com", START)]
+
+
+REPORT = "Report an issue with this chatbot to Duc-Anh"
+
+
+async def test_the_report_button_sends_an_issue_report_with_the_chat_reference(chat):
+    turn, cal = chat
+    out = await turn(REPORT)
+    assert "what went wrong" in out["answer"] and "email address" in out["answer"]
+    out = await turn("v@example.com, it said my call was cancelled but it was not",
+                     leave={"email": "v@example.com", "message": "it said my call was cancelled but it was not"})
+    assert "issue report" in out["answer"] and out["choices"] == ["Yes, send it", "No, cancel"]
+    out = await turn("Yes, send it")
+    assert cal.sent == ("v@example.com", "it said my call was cancelled but it was not", "issue", "sess-42")
+    assert "report is on its way" in out["answer"]
+
+
+async def test_the_report_reuses_an_email_already_given_in_the_chat(chat):
+    turn, cal = chat
+    await turn("book a call")
+    await turn("Book it for me here", DETAILS)
+    out = await turn(REPORT)
+    assert "what went wrong" in out["answer"] and "email address" not in out["answer"]
+    await turn("the times shown were wrong", leave={"message": "the times shown were wrong"})
+    await turn("Yes, send it")
+    assert cal.sent[0] == "ann@example.com" and cal.sent[2] == "issue"
