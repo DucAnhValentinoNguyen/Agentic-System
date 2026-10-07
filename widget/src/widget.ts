@@ -97,7 +97,8 @@ form{flex-shrink:0;display:flex;gap:8px;padding:10px;border-top:1px solid #e6e6e
 input{flex:1;min-width:0;padding:9px 11px;border:1px solid #c9c9c9;border-radius:10px;font:inherit;font-size:16px;min-height:44px;color:#1a1a1a;background:#fff}
 button.send{border:0;border-radius:10px;padding:0 14px;background:#1a1a1a;color:#fff;font:inherit;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}
-.note{flex-shrink:0;padding:0 14px 8px;color:#777;font-size:12px}
+.note{flex-shrink:0;padding:0 14px 2px;color:#777;font-size:12px}
+.credit{flex-shrink:0;padding:0 14px 8px;color:#777;font-size:12px}
 /* While the chat is open the button steps aside; it keeps its box so the window's anchor math still works. */
 :host(.chat-open) .fab{visibility:hidden;pointer-events:none}
 @media(max-width:600px){
@@ -123,6 +124,7 @@ function mount(): void {
     <div class="head">Duc-Anh's twin<button class="expand" type="button" aria-label="Expand chat" title="Expand chat">⛶</button><button class="close" type="button" aria-label="Close chat">×</button><button class="mute" type="button" aria-label="Mute notification sound" title="Mute notification sound"></button><small>Answers come from this site, with links to the source section.</small><span class="connection" role="status"></span></div>
     <div class="log" aria-live="polite"></div>
     <div class="note">An AI assistant. Messages are logged to improve it; don't share private data. Voice is transcribed on our server and not stored.</div>
+    <div class="credit">Made with ❤️ by Đức Anh Valentino Nguyễn</div>
     <div class="voice-status" role="status" aria-live="polite" hidden></div>
     <form><button class="mic" type="button" aria-pressed="false" aria-label="Speak your question" title="Speak your question (up to 30 seconds). The recording is transcribed on our server and not stored."><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15Zm6-3.5a1 1 0 1 0-2 0 4 4 0 0 1-8 0 1 1 0 1 0-2 0 6 6 0 0 0 5 5.91V20H9.5a1 1 0 1 0 0 2h5a1 1 0 1 0 0-2H13v-2.59A6 6 0 0 0 18 11.5Z"/></svg></button><input maxlength="1000" placeholder="Ask a question" aria-label="Your question"><button class="send">Send</button></form>
   </div>`;
