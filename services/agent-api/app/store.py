@@ -120,6 +120,30 @@ class Store:
             log.warning("store_failed", op="add_spend", error=str(e)[:200])
             return False
 
+    async def get_turns(self) -> int | None:
+        """Turns served today by all instances, or None if unavailable."""
+        if not self.enabled:
+            return None
+        try:
+            snap = await self.db().collection("counters").document(_now().strftime("%Y-%m-%d")).get()
+            return int((snap.to_dict() or {}).get("turns", 0))
+        except Exception as e:  # noqa: BLE001
+            log.warning("store_failed", op="get_turns", error=str(e)[:200])
+            return None
+
+    async def add_turns(self, n: int) -> bool:
+        if not self.enabled:
+            return True
+        try:
+            from google.cloud import firestore
+            now = _now()
+            await self.db().collection("counters").document(now.strftime("%Y-%m-%d")).set(
+                {"turns": firestore.Increment(n), "expire_at": now + RETENTION}, merge=True)
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.warning("store_failed", op="add_turns", error=str(e)[:200])
+            return False
+
     async def get_ip_turns(self, key: str) -> int | None:
         if not self.enabled:
             return None

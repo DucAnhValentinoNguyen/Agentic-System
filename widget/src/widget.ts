@@ -336,7 +336,7 @@ function mount(): void {
     ws.onclose = () => {
       ws = null;
       connection.textContent = "Disconnected";
-      if (!panel.classList.contains("open") && !pending) return;
+      if (!pending) return; // idle: the next question opens a new connection (the server closes idle ones)
       if (retries++ < 4) {
         connection.textContent = "Reconnecting…";
         setTimeout(connect, 500 * 2 ** retries);

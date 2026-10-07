@@ -83,13 +83,17 @@ async def lifespan(app: FastAPI):
     app.state.done_turns = {}             # (session, turn_id) -> final event (idempotent replay)
     app.state.audio_day, app.state.audio_clips = time.strftime("%Y-%m-%d"), 0
     app.state.ip_day = {}                 # salted daily hash of the address -> turns today
+    app.state.conns = defaultdict(int)    # address -> open chat connections (this instance)
+    app.state.turns_shared, app.state.turns_pending = 0, 0  # turns today: persisted total, and not yet written
     await router.sync_spend(app.state.store)  # a restart must not reset the day's spend
+    await sync_turns()
 
     async def spend_loop() -> None:
         while True:
             await asyncio.sleep(10)
             try:
                 await router.sync_spend(app.state.store)
+                await sync_turns()
             except Exception as e:  # noqa: BLE001
                 log.warning("spend_sync_failed", error=str(e)[:200])
 
@@ -100,6 +104,7 @@ async def lifespan(app: FastAPI):
     yield
     spend_task.cancel()
     await router.sync_spend(app.state.store)  # do not lose the last seconds of spend on shutdown
+    await sync_turns()
 
 
 app = FastAPI(title="Twin agent-api", lifespan=lifespan)
@@ -189,6 +194,21 @@ def rate_limited(ws: WebSocket) -> bool:
     return ip_limited(client_ip(ws), settings.rate_per_minute)
 
 
+async def sync_turns() -> None:
+    """Write the turns served here since the last call to the shared daily total, then read the total back."""
+    state = app.state
+    n, state.turns_pending = state.turns_pending, 0
+    if n and not await state.store.add_turns(n):
+        state.turns_pending += n
+    got = await state.store.get_turns()
+    if got is not None:
+        state.turns_shared = got
+
+
+def capacity_reached() -> bool:
+    return app.state.turns_shared + app.state.turns_pending >= settings.daily_turns_total
+
+
 async def ip_day_limited(ws: WebSocket) -> bool:
     """Per-visitor daily cap that survives restarts and new chats. The key is a salted daily hash, not the address."""
     key = hashlib.sha256(f"{client_ip(ws)}|{time.strftime('%Y-%m-%d')}".encode()).hexdigest()[:16]
@@ -219,6 +239,11 @@ async def admit(ws: WebSocket, session_id: str, turn_id: str) -> bool:
         await ws.send_json({"type": "error", "code": "rate_limited", "turn_id": turn_id,
                             "text": "Too many messages. Please wait a minute."})
         return False
+    if capacity_reached():
+        await ws.send_json({"type": "error", "code": "daily_capacity", "turn_id": turn_id,
+                            "text": "Twin has reached its capacity for today. Please come back tomorrow or email "
+                                    f"{settings.contact_email}."})
+        return False
     if await ip_day_limited(ws):
         await ws.send_json({"type": "error", "code": "daily_limit", "turn_id": turn_id,
                             "text": "You have reached today's limit from this connection. Please come back "
@@ -229,6 +254,7 @@ async def admit(ws: WebSocket, session_id: str, turn_id: str) -> bool:
                             "text": "This conversation reached its limit. Email "
                                     f"{settings.contact_email} to continue."})
         return False
+    app.state.turns_pending += 1
     return True
 
 
@@ -281,10 +307,19 @@ async def chat(ws: WebSocket):
     if ws.headers.get("origin") not in ORIGINS:
         await ws.close(code=1008)
         return
+    ip = client_ip(ws)
+    if app.state.conns[ip] >= settings.max_connections_per_ip:
+        await ws.close(code=1013)  # try again later
+        return
     await ws.accept()
+    app.state.conns[ip] += 1
     try:
         while True:
-            payload = await ws.receive_json()
+            try:
+                payload = await asyncio.wait_for(ws.receive_json(), settings.idle_timeout_s)
+            except TimeoutError:  # nobody is typing: free the connection (the widget reconnects when needed)
+                await ws.close(code=1000)
+                return
             spoken = isinstance(payload, dict) and payload.get("type") == "audio"
             try:
                 if spoken:
@@ -308,6 +343,10 @@ async def chat(ws: WebSocket):
             await run_turn(ws, msg, voice=spoken)
     except WebSocketDisconnect:
         pass
+    finally:
+        app.state.conns[ip] -= 1
+        if app.state.conns[ip] <= 0:
+            app.state.conns.pop(ip, None)
 
 
 async def run_turn(ws: WebSocket, msg: UserMsg, voice: bool = False) -> None:

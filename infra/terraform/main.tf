@@ -44,8 +44,28 @@ resource "google_service_account" "agent" {
   display_name = "Twin agent-api runtime"
 }
 
+# The runtime identities may call models and nothing else on Vertex. roles/aiplatform.user would also let a
+# compromised service start training jobs and endpoints, which is how a leaked token turns into a large bill.
+resource "google_project_iam_custom_role" "vertex_predict" {
+  role_id     = "twinVertexPredict"
+  title       = "Twin: call Vertex models, nothing else"
+  permissions = ["aiplatform.endpoints.predict"]
+}
+
+resource "google_project_iam_member" "agent_vertex_predict" {
+  project = var.project
+  role    = google_project_iam_custom_role.vertex_predict.id
+  member  = "serviceAccount:${google_service_account.agent.email}"
+}
+
+resource "google_project_iam_member" "retrieval_vertex_predict" {
+  project = var.project
+  role    = google_project_iam_custom_role.vertex_predict.id
+  member  = "serviceAccount:${google_service_account.retrieval.email}"
+}
+
 resource "google_project_iam_member" "agent_roles" {
-  for_each = toset(["roles/aiplatform.user", "roles/cloudtrace.agent", "roles/monitoring.metricWriter"])
+  for_each = toset(["roles/cloudtrace.agent", "roles/monitoring.metricWriter"])
   project  = var.project
   role     = each.key
   member   = "serviceAccount:${google_service_account.agent.email}"
@@ -176,12 +196,6 @@ resource "google_service_account" "retrieval" {
   display_name = "Twin retrieval runtime"
 }
 
-resource "google_project_iam_member" "retrieval_vertex" {
-  project = var.project
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.retrieval.email}"
-}
-
 resource "google_cloud_run_v2_service" "retrieval" {
   name                = "twin-retrieval"
   location            = var.region
@@ -218,7 +232,7 @@ resource "google_cloud_run_v2_service" "retrieval" {
       }
     }
   }
-  depends_on = [google_project_iam_member.retrieval_vertex]
+  depends_on = [google_project_iam_member.retrieval_vertex_predict]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "agent_calls_retrieval" {

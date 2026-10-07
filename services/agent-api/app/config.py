@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     rerank_keep: int = 5
     public_api_url: str = ""  # base URL of this service, used in cancel links
     cancel_secret: str = ""  # signs cancel links; empty turns the links off
+    daily_turns_total: int = 1500  # all visitors together, per day: bounds every cost that grows with turns
+    idle_timeout_s: int = 300  # an open chat connection that sends nothing for this long is closed
+    max_connections_per_ip: int = 8
     daily_turns_per_ip: int = 150  # per network address and day, persisted (the per-chat cap resets with a new chat)
     fault_inject: str = ""  # e.g. "vertex_429" — fault-injection exercises only
 
