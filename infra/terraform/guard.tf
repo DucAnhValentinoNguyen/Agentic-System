@@ -4,7 +4,7 @@
 # billing is linked again (see README, "Hard stop"). It starts in dry-run mode: set guard_dry_run = false once verified.
 variable "kill_switch_eur" { default = 200 }
 variable "guard_dry_run" { default = true }
-variable "guard_image_tag" { default = "429a48511615" } # only for creation; the deploy workflow keeps it current
+variable "guard_image_tag" { default = "1db6f788f3b0" } # only for creation; the deploy workflow keeps it current
 
 locals {
   guard_budget_name = "Twin hard stop"

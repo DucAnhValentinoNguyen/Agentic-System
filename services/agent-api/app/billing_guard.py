@@ -55,16 +55,19 @@ def token() -> str:
     return creds.token
 
 
-async def detach(project: str) -> str:
-    """Unlink the project from its billing account. Returns 'detached' or 'already_detached'; raises on failure."""
-    headers = {"Authorization": f"Bearer {token()}"}
-    async with httpx.AsyncClient(timeout=30) as c:
-        info = (await c.get(f"{API}/projects/{project}/billingInfo", headers=headers))
-        info.raise_for_status()
-        if not info.json().get("billingEnabled"):
-            return "already_detached"
-        r = await c.put(f"{API}/projects/{project}/billingInfo", headers=headers, json={"billingAccountName": ""})
-        r.raise_for_status()
+async def detach(project: str, transport: httpx.AsyncBaseTransport | None = None) -> str:
+    """Unlink the project from its billing account. Raises if it is still linked afterwards.
+
+    There is deliberately no "read the current state first" call: the guard's identity may detach but may not read
+    (a read returned 403 in testing), and a failing read would have stopped it from ever detaching. The call is
+    idempotent: detaching an already detached project returns the same result.
+    """
+    async with httpx.AsyncClient(timeout=30, transport=transport) as c:
+        r = await c.put(f"{API}/projects/{project}/billingInfo", headers={"Authorization": f"Bearer {token()}"},
+                        json={"billingAccountName": ""})
+    r.raise_for_status()
+    if r.json().get("billingEnabled"):
+        raise RuntimeError("billing is still enabled after the detach call")
     return "detached"
 
 
@@ -87,7 +90,7 @@ async def receive(request: Request):
     try:
         result = await detach(PROJECT)
     except Exception as e:  # noqa: BLE001
-        log.error("guard_detach_failed", error=str(e)[:300], project=PROJECT)
+        log.error("guard_detach_failed", error=str(e)[:300] or type(e).__name__, project=PROJECT)
         return JSONResponse({"ok": False}, status_code=500)  # Pub/Sub retries
     log.error("guard_billing_detached", result=result, reason=reason, project=PROJECT)
     return JSONResponse({"ok": True, "action": result})

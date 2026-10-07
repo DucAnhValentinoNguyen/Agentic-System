@@ -84,3 +84,26 @@ def test_the_default_is_dry_run():
     import os
     os.environ.pop("GUARD_DRY_RUN", None)
     assert importlib.reload(g).DRY_RUN is True
+
+
+async def test_detach_makes_one_write_call_and_no_read_first(monkeypatch):
+    import httpx
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, str(request.url), json.loads(request.content or b"{}")))
+        return httpx.Response(200, json={"name": "projects/p/billingInfo", "billingEnabled": False})
+    monkeypatch.setattr(g, "token", lambda: "t")
+    assert await g.detach("p", httpx.MockTransport(handler)) == "detached"
+    assert seen == [("PUT", "https://cloudbilling.googleapis.com/v1/projects/p/billingInfo", {"billingAccountName": ""})]
+
+
+async def test_detach_fails_loudly_if_billing_is_still_on(monkeypatch):
+    import httpx
+    monkeypatch.setattr(g, "token", lambda: "t")
+    still = httpx.MockTransport(lambda r: httpx.Response(200, json={"billingEnabled": True}))
+    with pytest.raises(RuntimeError):
+        await g.detach("p", still)
+    denied = httpx.MockTransport(lambda r: httpx.Response(403, json={"error": "no"}))
+    with pytest.raises(httpx.HTTPStatusError):
+        await g.detach("p", denied)

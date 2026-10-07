@@ -46,6 +46,7 @@ resource "google_service_account_iam_member" "deployer_acts_as" {
   for_each = {
     agent     = google_service_account.agent.name
     retrieval = google_service_account.retrieval.name
+    guard     = google_service_account.guard.name
   }
   service_account_id = each.value
   role               = "roles/iam.serviceAccountUser"
