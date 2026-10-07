@@ -49,9 +49,10 @@ Booking and message branches collect details, propose, **`interrupt()` until the
 
 - **Conversation state** (LangGraph checkpoints, rate limits) is still in memory on one instance: a restart drops
   in-flight conversations. Daily caps, turn history and feedback are durable in Firestore.
-- **Not built:** automated deploys from GitHub (deploys are `scripts/deploy.sh`), a local-GPU (RTX 4090) benchmark,
+- **Not built:** a local-GPU (RTX 4090) benchmark,
   Cloud Trace / OpenTelemetry (Langfuse is the tracing layer), long-term per-visitor memory.
-- **Pending on a human:** the LLM judge is not calibrated against human labels (`evals/calibrate.py`).
+- **Judge calibration:** on 47 hand-labelled answers the judge agrees 94% of the time, but kappa is about 0 and both
+  of its flags were false alarms, so its absolute rates are not trusted yet (`docs/experiment.md`).
 - **Negative result:** claim verification gave no benefit and costs about 2 s and 68% more per answer, so it is off.
 - **Research mode:** helps retrieval on average but not answer quality (unmeasured), costs more, and cannot fix
   vocabulary gaps (e.g. "private code"). It runs only for questions flagged complex.

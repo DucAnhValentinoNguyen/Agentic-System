@@ -40,10 +40,16 @@ generated text did not change). The apparent improvement disappeared.
 - 24 questions, one run each, one corpus: wide intervals. "No detectable benefit" is not "no benefit".
 - The judge fixes were made while looking at this held-out set's outputs, so it is no longer an untouched
   held-out set. Treat the numbers as development-grade.
-- **The judge is not yet calibrated against human labels.** `evals/results/audit.csv` holds the shuffled
-  items; fill `human_unsupported`, then `uv run python evals/calibrate.py score` prints Cohen's kappa with a
-  bootstrap CI. Until then the judge's absolute numbers are unverified; only the A-vs-B comparison, which uses
-  the same judge on both, is somewhat robust.
+- **Judge calibration against human labels (7 Oct, n=47).** Duc-Anh labelled 47 of the 48 held-out answers by
+  hand, blind to the judge (`evals/label_sheet.py`, `evals/calibrate.py score`). Raw agreement is 0.94, but
+  Cohen's kappa is -0.03 (95% bootstrap CI -0.06 to 1.00): agreement is high only because almost every answer is
+  clean. The judge flagged 2 answers and the human judged both supported (two false alarms); the human flagged 1
+  the judge did not (an on-topic question refused as off-topic, which is a routing failure rather than an
+  unsupported claim). So on this sample the judge's flags have no demonstrated precision, and its recall cannot
+  be measured because the set contains no confirmed unsupported claim. Consequence: the "2.3% vs 2.6%
+  unsupported" figures above are within the judge's false-alarm rate and should be read as "no detectable
+  difference", not as measured rates. Next step: a set enriched with deliberately corrupted answers, so recall
+  can be measured at all.
 - Abstention is measured with a phrase check (the LLM judge was unreliable on it). I read all 14 unanswerable
   answers: every one was a correct abstention.
 - Two bugs in my own measurement were found by sanity checks and fixed: per-turn cost was under-counted
