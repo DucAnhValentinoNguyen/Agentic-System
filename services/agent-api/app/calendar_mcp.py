@@ -181,6 +181,54 @@ def check_day(day: str) -> str:
 
 
 @mcp.tool()
+def find_slots(day: str = "", after: str = "", before: str = "") -> str:
+    """Free times inside a time-of-day window ("after 16:00", "before 12:00"), on one day (YYYY-MM-DD) or, with no
+    day, over the whole bookable week. `after`/`before` are HH:MM, Europe/Berlin. Returns JSON {status: "ok",
+    label, slots: [{start, label, max_slots}] (up to 8), reason, why, next: [...]}; when nothing fits, `reason`
+    says why (hours, notice, weekend, full) and `next` lists the closest free times in the same window."""
+    def hm(v: str) -> tuple[int, int] | None:
+        try:
+            h, m = v.split(":")
+            return int(h), int(m)
+        except ValueError:
+            return None
+
+    lo, hi = hm(after) if after else None, hm(before) if before else None
+    free = sorted(_free())
+    fs = set(free)
+
+    def inside(t: dt.datetime) -> bool:
+        return (lo is None or (t.hour, t.minute) >= lo) and (hi is None or (t.hour, t.minute) < hi)
+
+    def row(t: dt.datetime) -> dict:
+        return {"start": t.isoformat(), "label": sl.label(t), "max_slots": sl.max_run(fs, t)}
+
+    d = None
+    if day:
+        try:
+            d = dt.date.fromisoformat(day)
+        except ValueError:
+            return _out(status="invalid")
+    window = " ".join(x for x in (f"after {after}" if after else "", f"before {before}" if before else "") if x)
+    label = (d.strftime("%a %d %b") + " " if d else "") + window
+    hits = [t for t in free if inside(t) and (d is None or t.date() == d)]
+    if len(hits) > 8:
+        hits = hits[:4] + hits[-4:] if d else hits[:8]
+    if hits:
+        return _out(status="ok", label=label.strip(), slots=[row(t) for t in hits], reason="", why="", next=[])
+    work_end, work_start = sl.RULES.work_end, sl.RULES.work_start
+    if (lo is not None and lo[0] >= work_end) or (hi is not None and (hi[0], hi[1]) <= (work_start, 0)):
+        reason = "hours"
+    elif d is not None:
+        reason = (sl.why_not(dt.datetime(d.year, d.month, d.day, work_start, tzinfo=TZ), _now())
+                  or ("window" if any(t.date() == d for t in free) else "full"))
+    else:
+        reason = "window"
+    later = [t for t in free if inside(t) and (d is None or t.date() > d)][:4]
+    return _out(status="ok", label=label.strip(), slots=[], reason=reason, why=sl.reason_text(reason), next=[row(t) for t in later])
+
+
+@mcp.tool()
 def get_allowance(email: str) -> str:
     """How many of the visitor's 3 half-hour slots are still available. Returns JSON {held, remaining}."""
     if not EMAIL.match(email):

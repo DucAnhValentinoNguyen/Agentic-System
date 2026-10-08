@@ -71,6 +71,13 @@ class FakeCal:
                     "why": "Duc-Anh needs at least 24 hours' notice", "next": [SLOTS[1]]}
         return {"status": "ok", "label": "Sat 10 Oct", "slots": [], "reason": "weekend", "why": "he does not take calls at the weekend", "next": []}
 
+    async def find_slots(self, day="", after="", before=""):
+        self.found = (day, after, before)
+        if after == "17:00":
+            return {"status": "ok", "label": f"{day} after 17:00".strip(), "slots": [], "reason": "hours",
+                    "why": "he takes calls between 10:00 and 17:00 (Berlin time)", "next": []}
+        return {"status": "ok", "label": f"{day} after {after}".strip(), "slots": [SLOTS[1]], "reason": "", "why": "", "next": []}
+
     async def check_time(self, start, slots=1):
         if start == DIRECT_FREE:
             return {"status": "free", "label": "Thu 08 Oct, 15:00 (Berlin time)", "max_slots": 2}
@@ -434,3 +441,48 @@ async def test_tomorrow_is_understood_even_when_the_model_extracts_nothing(chat)
     assert "Nothing can be booked on" in out["answer"] or "these times are free" in out["answer"]
     assert out["choices"] != [s["label"] for s in SLOTS] or "free" in out["answer"]
     assert "Which of these times works for you?" not in out["answer"]                      # not the generic repeat
+
+
+async def test_after_4pm_is_read_as_a_part_of_the_day_even_when_the_model_extracts_nothing(chat):
+    turn, cal = chat
+    await book_one_details(turn)
+    out = await turn("anything after 4pm")
+    assert cal.found == ("", "16:00", "")
+    assert out["choices"] == [SLOTS[1]["label"]] and "these times are free" in out["answer"]
+
+
+async def test_a_weekday_with_a_time_window_keeps_the_day(chat):
+    turn, cal = chat
+    await book_one_details(turn)
+    await turn("how about tuesday after 4pm")
+    assert cal.found[0] != "" and cal.found[1] == "16:00"
+
+
+async def test_after_5pm_says_he_is_not_available_then(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    out = await turn("monday after 5pm")
+    assert "10:00 and 17:00" in out["answer"] and "Please email" in out["answer"]
+
+
+async def test_later_asks_for_times_after_the_last_one_shown(chat):
+    turn, cal = chat
+    await book_one_details(turn)
+    await turn("how about later")
+    assert cal.found == ("2026-10-07", "13:00", "")
+
+
+async def test_an_email_typed_in_the_message_replaces_a_remembered_one(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    out = await turn("Hung Dang hd@dojostack.ai", {"name": "Hung Dang"})                  # the model missed the email
+    assert out["booking"]["email"] == "hd@dojostack.ai"
+
+
+def test_time_window_readings():
+    from app.graph.build import time_window
+    assert time_window("anything after 4pm") == ("16:00", "")
+    assert time_window("after 16:30") == ("16:30", "")
+    assert time_window("before noon") == ("", "12:00")
+    assert time_window("in the afternoon") == ("12:00", "")
+    assert time_window("Tuesday at 4 is good") == ("", "")

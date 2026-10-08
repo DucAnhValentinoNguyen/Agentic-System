@@ -33,6 +33,8 @@ class BookingFields(BaseModel):
     requested_date: str | None = None  # YYYY-MM-DD when they name only a day ("tomorrow", "Friday") and no time
     requested_start: str | None = None  # ISO 8601 datetime the visitor explicitly named (e.g. "Thursday 3pm"),
                                          # resolved against today's date; null if they didn't name a specific time
+    after_time: str | None = None  # HH:MM: the earliest time of day they want ("after 4pm" -> 16:00, "afternoon" -> 12:00)
+    before_time: str | None = None  # HH:MM: the latest ("before noon" -> 12:00, "morning" -> 12:00)
     minutes: int | None = None  # length asked for a new meeting: 30, 60 or 90
     extend_to_minutes: int | None = None  # 60 or 90 when they ask to lengthen an existing booked meeting
     cancel: bool | None = False  # models sometimes emit null
@@ -120,6 +122,9 @@ class Calendar:
 
     async def free_slots(self) -> list[dict]:
         return await self._call("get_free_slots", {})  # type: ignore[return-value]
+
+    async def find_slots(self, day: str = "", after: str = "", before: str = "") -> dict:
+        return await self._call("find_slots", {"day": day, "after": after, "before": before})  # type: ignore[return-value]
 
     async def check_day(self, day: str) -> dict:
         return await self._call("check_day", {"day": day})  # type: ignore[return-value]

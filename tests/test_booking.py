@@ -375,3 +375,15 @@ def test_check_day_lists_the_days_free_times_or_says_why_there_are_none(cal, mon
     weekend = json.loads(m.check_day("2026-10-10"))
     assert weekend["reason"] == "weekend" and weekend["next"][0]["start"].startswith("2026-10-12")
     assert json.loads(m.check_day("tomorrow"))["status"] == "invalid"
+
+
+def test_find_slots_filters_by_time_of_day_and_says_why_nothing_fits(cal, monkeypatch):
+    monkeypatch.setattr(m, "_now", lambda: NOW9)
+    monkeypatch.setattr(m, "_free", lambda: list(FREE9))
+    pm = json.loads(m.find_slots("2026-10-13", after="15:00"))
+    assert pm["slots"] and all(s["start"][11:16] >= "15:00" for s in pm["slots"])
+    late = json.loads(m.find_slots("2026-10-13", after="17:00"))
+    assert late["slots"] == [] and late["reason"] == "hours"
+    anyday = json.loads(m.find_slots(after="16:00"))
+    assert anyday["slots"] and all(s["start"][11:16] >= "16:00" for s in anyday["slots"])
+    assert json.loads(m.find_slots("nope"))["status"] == "invalid"

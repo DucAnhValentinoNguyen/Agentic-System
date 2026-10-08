@@ -533,6 +533,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         "named a specific day and time themselves, e.g. \"Thursday 3pm\" or \"tomorrow at 10\", resolve it "
         "against today's date below and return full ISO 8601 with the Europe/Berlin offset, e.g. "
         "\"2026-10-08T15:00:00+02:00\"; null if they only picked from the shown slots or named no time), "
+        "after_time and before_time (HH:MM 24-hour, only if they ask for a part of the day: \"after 4pm\" gives "
+        "after_time 16:00, \"before noon\" gives before_time 12:00; otherwise null), "
         "requested_date (if they name only a day, such as tomorrow or Friday, and no time: that day as YYYY-MM-DD, resolved "
         "against today's date below; otherwise null), minutes (the length they ask for a NEW meeting: 30, 60 or 90, or null), extend_to_minutes (the TOTAL "
         "length in minutes they want for an EXISTING booked meeting, for example 60, 90 or 120, else null), "
@@ -690,6 +692,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             b["name"] = f.name.strip()[:80]
         if f.email and bk.EMAIL.fullmatch(f.email.strip()):
             b["email"] = f.email.strip()
+        if (typed := EMAIL_IN_TEXT.search(qs)) and bk.EMAIL.fullmatch(typed.group(0)):
+            b["email"] = typed.group(0)          # an address they typed beats the model's reading and any remembered one
         if f.topic:
             b["topic"] = f.topic.strip()[:300]
         if f.minutes and to_slots(f.minutes):
@@ -699,7 +703,32 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
 
         # ---- Availability questions need no personal details, so they are answered first, with the reason when
         # the answer is no (notice period, weekend, outside hours, taken). A time they pick is remembered. ----
-        if f.requested_start and not b.get("chosen"):
+        after, before = (f.after_time or "", f.before_time or "")
+        if not (after or before):
+            after, before = time_window(qs)
+        later_day = ""
+        if not (after or before) and slots and LATER.search(qs):
+            # "how about later": more times after the last one shown, the same day if any are left
+            last_shown = dt.datetime.fromisoformat(slots[-1]["start"])
+            after, later_day = (last_shown + sl.SLOT).strftime("%H:%M"), last_shown.date().isoformat()
+        if (after or before) and not b.get("chosen") and not f.slot_choice:
+            day_iso = (f.requested_date or (f.requested_start or "")[:10]
+                       or named_weekday(qs, dt.datetime.now(sl.TZ).date()) or later_day)
+            try:
+                info = await calendar.find_slots(day_iso, after, before)
+            except Exception as e:  # noqa: BLE001
+                log.error("find_slots_failed", error=str(e)[:200])
+                info = {"status": "failed"}
+            if info.get("status") == "ok":
+                shown = info.get("slots") or info.get("next") or []
+                if shown:
+                    b["slots"], b["stage"] = shown, "choosing"
+                    text = (f"On {info['label']} these times are free. Pick one, or type another time." if info.get("slots")
+                            else f"Nothing is free {info['label']}: {info['why']}. The closest free times are:")
+                    return say(text + ask_details, [x["label"] for x in shown], booking=b)
+                return say(f"Nothing can be booked {info['label']}: {info['why']}. "
+                           f"Please email {settings.contact_email}.", booking={})
+        if f.requested_start and not b.get("chosen") and not (after or before):
             try:
                 req_dt = dt.datetime.fromisoformat(f.requested_start)
             except ValueError:
@@ -723,7 +752,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                     return say(f"{sl.label(req_dt)} isn't available{why}, and I couldn't find a nearby free time. "
                                f"Please email {settings.contact_email}.", booking={})
                 # status "invalid" or "failed": fall through to the normal offered-slots path below
-        elif f.requested_date and not b.get("chosen"):
+        elif f.requested_date and not b.get("chosen") and not (after or before):
             try:
                 day = dt.date.fromisoformat(f.requested_date)
             except ValueError:
@@ -897,6 +926,48 @@ EASTER_TEXT = "Yeah, well, maybe next time you will estimate me."
 EASTER_CREDIT = {"label": "Image: r/DunderMifflin",
                  "url": "https://www.reddit.com/r/DunderMifflin/comments/1ec5z4o/after_people_do_a_rewatch_and_say_they/"}
 TODAY_TOMORROW = re.compile(r"\b(tomorrow|today)\b", re.IGNORECASE)
+# "after 4pm", "from 16:30", "before noon", "in the afternoon": a part of the day, not one exact time. Resolved here because
+# the model is unreliable on these short follow-ups.
+AFTER_TIME = re.compile(r"\b(?:after|from|later than)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|h|uhr)?\b", re.IGNORECASE)
+BEFORE_TIME = re.compile(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|h|uhr)?\b|\bbefore\s+(noon)\b", re.IGNORECASE)
+PART_OF_DAY = {"morning": ("", "12:00"), "afternoon": ("12:00", ""), "evening": ("17:00", ""), "noon": ("12:00", "")}
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+LATER = re.compile(r"\b(later|other times|more times|something else|different time)\b", re.IGNORECASE)
+EMAIL_IN_TEXT = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def _hhmm(hour: str, minute: str | None, ampm: str | None) -> str | None:
+    h = int(hour)
+    if (ampm or "").lower() == "pm" and h < 12:
+        h += 12
+    elif (ampm or "").lower() == "am" and h == 12:
+        h = 0
+    elif not ampm and 1 <= h <= 8:
+        h += 12                                  # "after 4" in a booking chat means 16:00
+    return f"{h:02d}:{minute or '00'}" if h < 24 and int(minute or 0) < 60 else None
+
+
+def time_window(text: str) -> tuple[str, str]:
+    """(after, before) as HH:MM, "" when not given, read from words like "after 4pm" or "in the afternoon"."""
+    after = before = ""
+    if m := AFTER_TIME.search(text):
+        after = _hhmm(m.group(1), m.group(2), m.group(3)) or ""
+    if m := BEFORE_TIME.search(text):
+        before = "12:00" if m.group(4) else (_hhmm(m.group(1), m.group(2), m.group(3)) or "")
+    if not after and not before:
+        for word, (a, b) in PART_OF_DAY.items():
+            if re.search(rf"\b{word}\b", text, re.IGNORECASE):
+                return a, b
+    return after, before
+
+
+def named_weekday(text: str, today: dt.date) -> str | None:
+    """The next date (YYYY-MM-DD) of a weekday named in the text, e.g. "tuesday after 4pm"; None if none is named."""
+    low = text.lower()
+    for i, name in enumerate(WEEKDAYS):
+        if re.search(rf"\b{name}\b|\b{name[:3]}\b", low):
+            return (today + dt.timedelta(days=(i - today.weekday()) % 7 or 7)).isoformat()
+    return None
 ASK_EXISTING = re.compile(
     r"\b(when|what time)\b.{0,12}\b(is|was|are|did)\b.{0,12}\b(my|the)\b.{0,15}\b(appointment|booking|call|meeting)\b"
     r"|\b(do i have|did i book|have i booked|did i schedule)\b.{0,30}\b(appointment|booking|call|meeting)\b",

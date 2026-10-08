@@ -93,6 +93,7 @@ def reason_text(code: str, rules: Rules = RULES) -> str:
         "blocked": "that hour is blocked on Wednesdays and Fridays (13:00 to 14:00)",
         "taken": "that time is already taken",
         "full": "everything that day is already taken",
+        "window": "nothing is free in that part of the day",
     }.get(code, "")
 
 
