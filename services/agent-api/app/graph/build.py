@@ -520,7 +520,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         "named a specific day and time themselves, e.g. \"Thursday 3pm\" or \"tomorrow at 10\", resolve it "
         "against today's date below and return full ISO 8601 with the Europe/Berlin offset, e.g. "
         "\"2026-10-08T15:00:00+02:00\"; null if they only picked from the shown slots or named no time), "
-        "minutes (the length they ask for a NEW meeting: 30, 60 or 90, or null), extend_to_minutes (the TOTAL "
+        "requested_date (if they name only a day, such as tomorrow or Friday, and no time: that day as YYYY-MM-DD, resolved "
+        "against today's date below; otherwise null), minutes (the length they ask for a NEW meeting: 30, 60 or 90, or null), extend_to_minutes (the TOTAL "
         "length in minutes they want for an EXISTING booked meeting, for example 60, 90 or 120, else null), "
         "cancel (true ONLY if they clearly say to stop, cancel or never mind; a complaint, a question or a "
         "correction is NOT a cancel), ask_existing (true if they ask when their call is or whether they have one "
@@ -677,13 +678,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         if f.minutes and to_slots(f.minutes):
             b["want"] = to_slots(f.minutes)
         missing = [k for k in ("name", "email", "topic") if not b.get(k)]
-        if missing:
-            b["stage"] = "collecting"
-            return say("Happy to set up a call with Duc-Anh. Could you tell me "
-                       + " and ".join(ASK[x] for x in missing) + "?", booking=b)
+        ask_details = " To book one, tell me your name, your email address and what it is about." if missing else ""
 
-        # ---- The visitor typed a specific day/time themselves: check it directly against the real calendar,
-        # rather than only matching against the small sample of offered slots. ----
+        # ---- Availability questions need no personal details, so they are answered first, with the reason when
+        # the answer is no (notice period, weekend, outside hours, taken). A time they pick is remembered. ----
         if f.requested_start and not b.get("chosen"):
             try:
                 req_dt = dt.datetime.fromisoformat(f.requested_start)
@@ -701,12 +699,44 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                     nearby = chk.get("nearby") or []
                     b["slots"] = slots = nearby
                     b["stage"] = "choosing"
+                    why = f": {chk['why']}" if chk.get("why") else ""
                     if nearby:
-                        return say(f"{sl.label(req_dt)} isn't available. Here are free times nearby:",
+                        return say(f"{sl.label(req_dt)} isn't available{why}. Here are free times nearby:" + ask_details,
                                    [x["label"] for x in slots], booking=b)
-                    return say(f"{sl.label(req_dt)} isn't available, and I couldn't find a nearby free time. "
+                    return say(f"{sl.label(req_dt)} isn't available{why}, and I couldn't find a nearby free time. "
                                f"Please email {settings.contact_email}.", booking={})
                 # status "invalid" or "failed": fall through to the normal offered-slots path below
+        elif f.requested_date and not b.get("chosen"):
+            try:
+                day = dt.date.fromisoformat(f.requested_date)
+            except ValueError:
+                day = None
+            if day:
+                try:
+                    info = await calendar.check_day(day.isoformat())
+                except Exception as e:  # noqa: BLE001
+                    log.error("check_day_failed", error=str(e)[:200])
+                    info = {"status": "failed"}
+                if info.get("status") == "ok":
+                    shown = info.get("slots") or info.get("next") or []
+                    b["slots"] = slots = shown
+                    b["stage"] = "choosing"
+                    if info.get("slots"):
+                        text = f"On {info['label']} these times are free. Pick one, or type another time."
+                    elif shown:
+                        text = f"Nothing can be booked on {info['label']}: {info['why']}. The next free times are:"
+                    else:
+                        return say(f"Nothing can be booked on {info['label']}: {info['why']}. "
+                                   f"Please email {settings.contact_email}.", booking={})
+                    return say(text + ask_details, [x["label"] for x in shown], booking=b)
+        if f.slot_choice and 1 <= f.slot_choice <= len(slots) and not b.get("chosen"):
+            b["chosen"] = slots[f.slot_choice - 1]
+        if missing:
+            b["stage"] = "collecting"
+            when = f" on {b['chosen']['label']}" if b.get("chosen") else ""
+            return say(f"Happy to set up a call with Duc-Anh{when}. Could you tell me "
+                       + " and ".join(ASK[x] for x in missing) + "?", booking=b)
+
         if not slots and not b.get("chosen"):
             try:
                 b["slots"] = slots = await calendar.free_slots()

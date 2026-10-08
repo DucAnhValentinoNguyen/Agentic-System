@@ -333,3 +333,45 @@ def test_a_cancelled_time_can_be_booked_again(cal):
     book()
     cancel()
     assert book()["status"] == "created"
+
+
+# ---------------------------------------------------------------- explaining why a time is not bookable
+
+NOW9 = day(2026, 10, 8, 18)          # Thursday evening
+FREE9 = sl.free_slots([], NOW9)      # what the rules allow from that moment
+
+
+def test_why_not_names_the_rule_that_applies():
+    assert sl.why_not(day(2026, 10, 9, 10), NOW9) == "notice"                 # tomorrow morning: under 24 hours away
+    assert sl.why_not(day(2026, 10, 10, 11), NOW9) == "weekend"
+    assert sl.why_not(day(2026, 10, 12, 8), NOW9) == "hours"                  # Monday 08:00, before the working day
+    assert sl.why_not(day(2026, 10, 12, 16, 30), NOW9) == ""                  # the last slot of the day is fine
+    assert sl.why_not(day(2026, 10, 12, 17), NOW9) == "hours"
+    assert sl.why_not(day(2026, 10, 14, 13), NOW9) == "blocked"               # Wednesday 13:00
+    assert sl.why_not(day(2026, 10, 30, 10), NOW9) == "horizon"
+    assert sl.why_not(day(2026, 10, 12, 11), NOW9) == ""                      # allowed by the rules: only the calendar can say no
+    for code in ("notice", "horizon", "weekend", "hours", "blocked", "taken", "full"):
+        assert sl.reason_text(code)
+
+
+def test_check_time_gives_the_reason(cal, monkeypatch):
+    monkeypatch.setattr(m, "_now", lambda: NOW9)
+    monkeypatch.setattr(m, "_free", lambda: list(FREE9))
+    assert json.loads(m.check_time(day(2026, 10, 9, 10).isoformat()))["reason"] == "notice"
+    assert json.loads(m.check_time(day(2026, 10, 10, 10).isoformat()))["reason"] == "weekend"
+    monkeypatch.setattr(m, "_free", lambda: [t for t in FREE9 if t != day(2026, 10, 12, 11)])
+    r = json.loads(m.check_time(day(2026, 10, 12, 11).isoformat()))
+    assert r["reason"] == "taken" and r["why"] == "that time is already taken"
+
+
+def test_check_day_lists_the_days_free_times_or_says_why_there_are_none(cal, monkeypatch):
+    monkeypatch.setattr(m, "_now", lambda: NOW9)
+    monkeypatch.setattr(m, "_free", lambda: list(FREE9))
+    ok = json.loads(m.check_day("2026-10-13"))
+    assert ok["status"] == "ok" and ok["slots"] and ok["label"] == "Tue 13 Oct" and len(ok["slots"]) <= 8
+    assert all(s["start"].startswith("2026-10-13") for s in ok["slots"])
+    soon = json.loads(m.check_day("2026-10-09"))                               # tomorrow
+    assert soon["slots"] == [] and soon["reason"] == "notice" and soon["next"]
+    weekend = json.loads(m.check_day("2026-10-10"))
+    assert weekend["reason"] == "weekend" and weekend["next"][0]["start"].startswith("2026-10-12")
+    assert json.loads(m.check_day("tomorrow"))["status"] == "invalid"

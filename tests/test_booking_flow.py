@@ -63,11 +63,19 @@ class FakeCal:
         self.held = 0
         return {"status": "cancelled", "label": "label"}
 
+    async def check_day(self, day):
+        if day == "2026-10-06":
+            return {"status": "ok", "label": "Tue 06 Oct", "slots": SLOTS, "reason": "", "why": "", "next": []}
+        if day == "2026-10-09":                                  # tomorrow: inside the notice period
+            return {"status": "ok", "label": "Fri 09 Oct", "slots": [], "reason": "notice",
+                    "why": "Duc-Anh needs at least 24 hours' notice", "next": [SLOTS[1]]}
+        return {"status": "ok", "label": "Sat 10 Oct", "slots": [], "reason": "weekend", "why": "he does not take calls at the weekend", "next": []}
+
     async def check_time(self, start, slots=1):
         if start == DIRECT_FREE:
             return {"status": "free", "label": "Thu 08 Oct, 15:00 (Berlin time)", "max_slots": 2}
         if start == DIRECT_BUSY:
-            return {"status": "busy", "nearby": [SLOTS[0]]}
+            return {"status": "busy", "reason": "notice", "why": "Duc-Anh needs at least 24 hours' notice", "nearby": [SLOTS[0]]}
         return {"status": "busy", "nearby": []}
 
 
@@ -369,3 +377,51 @@ async def test_no_cancel_link_when_no_secret_is_configured(chat, monkeypatch):
     await turn("30 min")
     out = await turn("Yes, book it")
     assert not out.get("links")
+
+
+async def test_a_day_with_free_times_lists_them_even_before_the_visitor_gave_any_details(chat):
+    turn, _ = chat
+    await turn("book a call")
+    out = await turn("what is free on Tuesday?", {"requested_date": "2026-10-06"})        # no name or email yet
+    assert out["choices"] == [x["label"] for x in SLOTS]
+    assert "these times are free" in out["answer"] and "tell me your name" in out["answer"]
+
+
+async def test_a_day_that_is_too_soon_says_why_instead_of_repeating_the_list(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    out = await turn("I want to meet him tomorrow", {"requested_date": "2026-10-09"})
+    assert "Nothing can be booked on Fri 09 Oct" in out["answer"] and "24 hours' notice" in out["answer"]
+    assert out["choices"] == [SLOTS[1]["label"]]                                          # the next free time is offered
+
+
+async def test_a_weekend_with_nothing_after_it_sends_the_visitor_to_email(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    out = await turn("what about Saturday?", {"requested_date": "2026-10-10"})
+    assert "weekend" in out["answer"] and "email" in out["answer"].lower() and not out["choices"]
+
+
+async def test_an_unavailable_time_explains_the_reason(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    out = await turn("how about Friday at 8am", {"requested_start": DIRECT_BUSY})
+    assert "isn't available: Duc-Anh needs at least 24 hours' notice" in out["answer"]
+
+
+async def test_a_time_picked_before_the_details_is_kept_while_they_are_collected(chat):
+    turn, cal = chat
+    await turn("book a call")
+    await turn("what is free on Tuesday?", {"requested_date": "2026-10-06"})
+    out = await turn(SLOTS[0]["label"], {"slot_choice": 1})
+    assert "on Tue 06 Oct, 10:00" in out["answer"] and "Could you tell me" in out["answer"]
+    out = await turn("Ann, ann@example.com, internship", DETAILS)                         # now it carries on from the chosen time
+    assert out["choices"] == ["30 min", "60 min", "90 min"]
+    await turn("30 min")
+    await turn("Yes, book it")
+    assert cal.created == [("Ann", "ann@example.com", "internship", START, 1)]
+
+
+async def book_one_details(turn):
+    await turn("book a call")
+    return await turn("Book it for me here", DETAILS)

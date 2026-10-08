@@ -77,8 +77,12 @@ def _busy(start: dt.datetime, end: dt.datetime) -> list[tuple[dt.datetime, dt.da
     return out
 
 
+def _now() -> dt.datetime:
+    return dt.datetime.now(TZ)
+
+
 def _free() -> list[dt.datetime]:
-    now = dt.datetime.now(TZ)
+    now = _now()
     return sl.free_slots(_busy(now, now + dt.timedelta(days=sl.RULES.horizon_days + 1)), now)
 
 
@@ -140,10 +144,40 @@ def check_time(start: str, slots: int = 1) -> str:
     free = set(_free())
     if sl.run_ok(free, start_dt, slots):
         return _out(status="free", label=sl.label(start_dt, slots), max_slots=sl.max_run(free, start_dt))
+    now = _now()
+    reason = (sl.why_not(start_dt, now)
+              or next((c for i in range(slots) if (c := sl.why_not(start_dt + sl.SLOT * i, now))), "")
+              or "taken")
     nearby = sorted(free, key=lambda t: abs((t - start_dt).total_seconds()))[:4]
     nearby.sort()
-    return _out(status="busy", nearby=[
+    return _out(status="busy", reason=reason, why=sl.reason_text(reason), nearby=[
         {"start": t.isoformat(), "label": sl.label(t), "max_slots": sl.max_run(free, t)} for t in nearby])
+
+
+@mcp.tool()
+def check_day(day: str) -> str:
+    """What is bookable on one day (YYYY-MM-DD, Europe/Berlin)? Returns JSON {status: "ok", label, slots: [{start,
+    label, max_slots}] (up to 8, spread over the day), reason, why, next: [...]}. When nothing is free that day,
+    `reason` says why (notice, horizon, weekend, full) and `next` lists the first free times after it."""
+    try:
+        d = dt.date.fromisoformat(day)
+    except ValueError:
+        return _out(status="invalid")
+    free = sorted(_free())
+    fs = set(free)
+    on_day = [t for t in free if t.date() == d]
+    pick = on_day if len(on_day) <= 8 else on_day[:4] + on_day[-4:]
+
+    def row(t: dt.datetime) -> dict:
+        return {"start": t.isoformat(), "label": sl.label(t), "max_slots": sl.max_run(fs, t)}
+
+    label = d.strftime("%a %d %b")
+    if pick:
+        return _out(status="ok", label=label, slots=[row(t) for t in pick], reason="", why="", next=[])
+    now = _now()
+    reason = sl.why_not(dt.datetime(d.year, d.month, d.day, sl.RULES.work_start, tzinfo=TZ), now) or "full"
+    after = [t for t in free if t.date() > d][:4]
+    return _out(status="ok", label=label, slots=[], reason=reason, why=sl.reason_text(reason), next=[row(t) for t in after])
 
 
 @mcp.tool()

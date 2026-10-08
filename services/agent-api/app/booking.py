@@ -30,6 +30,7 @@ class BookingFields(BaseModel):
     email: str | None = None
     topic: str | None = None
     slot_choice: int | None = None  # 1-based index into the slots that were shown
+    requested_date: str | None = None  # YYYY-MM-DD when they name only a day ("tomorrow", "Friday") and no time
     requested_start: str | None = None  # ISO 8601 datetime the visitor explicitly named (e.g. "Thursday 3pm"),
                                          # resolved against today's date; null if they didn't name a specific time
     minutes: int | None = None  # length asked for a new meeting: 30, 60 or 90
@@ -119,6 +120,9 @@ class Calendar:
 
     async def free_slots(self) -> list[dict]:
         return await self._call("get_free_slots", {})  # type: ignore[return-value]
+
+    async def check_day(self, day: str) -> dict:
+        return await self._call("check_day", {"day": day})  # type: ignore[return-value]
 
     async def check_time(self, start: str, slots: int = 1) -> dict:
         return await self._call("check_time", {"start": start, "slots": slots})  # type: ignore[return-value]

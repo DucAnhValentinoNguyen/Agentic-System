@@ -64,6 +64,38 @@ def free_slots(busy: Busy, now: dt.datetime, rules: Rules = RULES) -> list[dt.da
     return out
 
 
+def why_not(start: dt.datetime, now: dt.datetime, rules: Rules = RULES) -> str:
+    """Why this start time can never be booked, judged from the fixed rules alone.
+
+    "notice", "horizon", "weekend", "hours" or "blocked"; "" means the rules allow it, so if it is not free
+    something in the calendar is in the way.
+    """
+    if start < now + dt.timedelta(hours=rules.min_notice_h):
+        return "notice"
+    if start.date() > (now + dt.timedelta(days=rules.horizon_days)).date():
+        return "horizon"
+    if start.weekday() not in rules.days:
+        return "weekend"
+    if start.hour < rules.work_start or start + SLOT > start.replace(hour=rules.work_end, minute=0, second=0, microsecond=0):
+        return "hours"
+    if _blocked(start, rules):
+        return "blocked"
+    return ""
+
+
+def reason_text(code: str, rules: Rules = RULES) -> str:
+    """The reason as a sentence a visitor can read."""
+    return {
+        "notice": f"Duc-Anh needs at least {rules.min_notice_h} hours' notice",
+        "horizon": f"I can only book up to {rules.horizon_days} days ahead",
+        "weekend": "he does not take calls at the weekend",
+        "hours": f"he takes calls between {rules.work_start}:00 and {rules.work_end}:00 (Berlin time)",
+        "blocked": "that hour is blocked on Wednesdays and Fridays (13:00 to 14:00)",
+        "taken": "that time is already taken",
+        "full": "everything that day is already taken",
+    }.get(code, "")
+
+
 def run_ok(free: set[dt.datetime], start: dt.datetime, n: int) -> bool:
     """True if n consecutive slots starting at `start` are all free (so a run never crosses a block or the day's end)."""
     return 1 <= n <= MAX_SLOTS_PER_VISITOR and all(start + SLOT * i in free for i in range(n))
