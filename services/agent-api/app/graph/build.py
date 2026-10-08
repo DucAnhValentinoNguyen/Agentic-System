@@ -703,14 +703,17 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
 
         # ---- Availability questions need no personal details, so they are answered first, with the reason when
         # the answer is no (notice period, weekend, outside hours, taken). A time they pick is remembered. ----
-        after, before = (f.after_time or "", f.before_time or "")
-        if not (after or before):
-            after, before = time_window(qs)
+        after, before = time_window(qs)
+        if not (after or before) and re.search(r"\d", qs):
+            after, before = (f.after_time or "", f.before_time or "")      # the model's reading, only when this message has a time
         later_day = ""
         if not (after or before) and slots and LATER.search(qs):
             # "how about later": more times after the last one shown, the same day if any are left
             last_shown = dt.datetime.fromisoformat(slots[-1]["start"])
             after, later_day = (last_shown + sl.SLOT).strftime("%H:%M"), last_shown.date().isoformat()
+            if (last_shown + sl.SLOT).hour >= sl.RULES.work_end:
+                return say("Those are the latest times that day. Tell me another day, for example \"Tuesday\", "
+                           "or a time like \"Thursday at 11\"." + ask_details, [x["label"] for x in slots], booking=b)
         if (after or before) and not b.get("chosen") and not f.slot_choice:
             day_iso = (f.requested_date or (f.requested_start or "")[:10]
                        or named_weekday(qs, dt.datetime.now(sl.TZ).date()) or later_day)
@@ -723,11 +726,11 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                 shown = info.get("slots") or info.get("next") or []
                 if shown:
                     b["slots"], b["stage"] = shown, "choosing"
-                    text = (f"On {info['label']} these times are free. Pick one, or type another time." if info.get("slots")
+                    text = (f"These times are free {info['label']}. Pick one, or type another time." if info.get("slots")
                             else f"Nothing is free {info['label']}: {info['why']}. The closest free times are:")
                     return say(text + ask_details, [x["label"] for x in shown], booking=b)
-                return say(f"Nothing can be booked {info['label']}: {info['why']}. "
-                           f"Please email {settings.contact_email}.", booking={})
+                return say(f"Nothing can be booked {info['label']}: {info['why']}. Try another day or time, "
+                           f"or email {settings.contact_email}.", booking=b)
         if f.requested_start and not b.get("chosen") and not (after or before):
             try:
                 req_dt = dt.datetime.fromisoformat(f.requested_start)

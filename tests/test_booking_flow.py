@@ -448,7 +448,7 @@ async def test_after_4pm_is_read_as_a_part_of_the_day_even_when_the_model_extrac
     await book_one_details(turn)
     out = await turn("anything after 4pm")
     assert cal.found == ("", "16:00", "")
-    assert out["choices"] == [SLOTS[1]["label"]] and "these times are free" in out["answer"]
+    assert out["choices"] == [SLOTS[1]["label"]] and "These times are free" in out["answer"]
 
 
 async def test_a_weekday_with_a_time_window_keeps_the_day(chat):
@@ -462,7 +462,7 @@ async def test_after_5pm_says_he_is_not_available_then(chat):
     turn, _ = chat
     await book_one_details(turn)
     out = await turn("monday after 5pm")
-    assert "10:00 and 17:00" in out["answer"] and "Please email" in out["answer"]
+    assert "10:00 and 17:00" in out["answer"] and "Try another day" in out["answer"]
 
 
 async def test_later_asks_for_times_after_the_last_one_shown(chat):
@@ -486,3 +486,20 @@ def test_time_window_readings():
     assert time_window("before noon") == ("", "12:00")
     assert time_window("in the afternoon") == ("12:00", "")
     assert time_window("Tuesday at 4 is good") == ("", "")
+
+
+async def test_a_refused_time_window_keeps_the_details_for_the_next_try(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    await turn("monday after 5pm")
+    out = await turn("how about tuesday after 4pm")
+    assert "Which of these" not in out["answer"] and "booking page" not in out["answer"]
+    assert out["booking"]["email"] == "ann@example.com"
+
+
+async def test_the_models_stale_window_is_ignored_when_the_message_has_no_time(chat):
+    turn, cal = chat
+    await book_one_details(turn)
+    cal.found = None
+    await turn("how about the one on wednesday", {"after_time": "16:00"})
+    assert cal.found is None
