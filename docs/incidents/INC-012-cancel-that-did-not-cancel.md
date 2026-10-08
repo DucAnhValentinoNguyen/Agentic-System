@@ -19,8 +19,11 @@ as a new booking request, which restarts the flow and ends at the limit.
 - Verified live with a throwaway address (book 90 min, ask when, hit the limit, cancel, calendar shows 0 slots held). The leftover
   call from the report was cancelled with the new tool.
 
-**Not done, deliberately.** Cancelling is limited to calls booked in the same chat; a visitor who returns later is sent to email.
-Letting a bare email address cancel a call from another session would let anyone cancel anyone's booking.
+**Follow-up: cancelling from a later visit.** The in-chat cancel only covers calls booked in the same chat, because a bare email
+address must never be enough to cancel someone's call. For later visits the booking confirmation now carries a signed cancel
+link (calendar event id plus an HMAC with a server secret: unguessable, no personal data, nothing stored). Opening it shows a page;
+only its button cancels, so link previews cannot. The widget also remembers the booking in the browser and shows "My call ... cancel"
+until the call ends. Tested live with a throwaway address, including an altered link (404) and a second press ("already cancelled").
 
 **Lesson.** An assistant must never report an action it has no tool for, and its claims need testing against the system of record
 (the calendar), not against its own conversation state. This was found by a person using it, not by the 35-case suite, which

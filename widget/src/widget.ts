@@ -317,10 +317,33 @@ function mount(): void {
   };
 
   let retries = 0;
+  // Shown when the server cannot be reached at all (maintenance, or the service is switched off), instead of an
+  // endless "Reconnecting…". It points to the ways that do not depend on Twin.
+  let offlineShown = false;
+  const showOffline = (): void => {
+    connection.textContent = "Offline";
+    if (offlineShown) return;
+    offlineShown = true;
+    const el = add("bot");
+    el.append("Twin is offline right now. You can still reach Duc-Anh by email at ");
+    const a = document.createElement("a");
+    a.href = "mailto:anh.nguyen1@campus.lmu.de";
+    a.textContent = "anh.nguyen1@campus.lmu.de";
+    el.append(a, ", or on ");
+    const l = document.createElement("a");
+    l.href = "https://www.linkedin.com/in/duc-anh-nguyen-ml/";
+    l.target = "_blank";
+    l.rel = "noopener noreferrer";
+    l.textContent = "LinkedIn";
+    el.append(l, ". The rest of this page works as usual.");
+  };
   const connect = (): void => {
     connection.textContent = retries ? "Reconnecting…" : "Connecting to Twin…";
     ws = new WebSocket(WS_URL);
+    let opened = false;
     ws.onopen = () => {
+      opened = true;
+      offlineShown = false;
       connection.textContent = "Connected";
       retries = 0;
       // Resend an unfinished turn under the same turn id; the server runs it at most once
@@ -336,6 +359,17 @@ function mount(): void {
     ws.onclose = () => {
       ws = null;
       connection.textContent = "Disconnected";
+      if (!opened) {  // the handshake itself failed: try twice more, then say plainly that Twin is offline
+        if (retries++ < 2) {
+          connection.textContent = "Reconnecting…";
+          setTimeout(connect, 1500 * retries);
+        } else {
+          retries = 0;
+          if (pending) { pending.el.remove(); pending = null; busy(false); }
+          showOffline();
+        }
+        return;
+      }
       if (!pending) return; // idle: the next question opens a new connection (the server closes idle ones)
       if (retries++ < 4) {
         connection.textContent = "Reconnecting…";
