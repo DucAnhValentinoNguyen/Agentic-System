@@ -41,7 +41,7 @@ Booking and message branches collect details, propose, **`interrupt()` until the
 | Routing and failure | tiered router, circuit breaker, TTFT timeout, 429 retry + cooldown, 3 providers on 2 vendors, retrieval-only degraded mode, truncation guard | INC-001, 002, 004 |
 | Persistence | Firestore: turns, audit, durable counters; TTL (30 days) and a composite index in Terraform | `docs/SCHEMA.md` |
 | Online scoring | thumbs in the widget, LLM judge as a scheduled Cloud Run Job, scores on the Langfuse trace | judged a live turn |
-| Offline evaluation | 36-case adversarial suite (incl. poisoned documents), 40-case fact set, 12 multi-hop cases, paired bootstrap | 2 experiments, 5 incidents written up |
+| Offline evaluation | 38-case adversarial suite (35 run against every new revision before it takes traffic, 3 poisoned-document cases run locally), 40-case fact set, 12 multi-hop cases, paired bootstrap, 47 hand labels for the judge | 4 experiments, 14 incidents written up |
 | Observability | Langfuse (one nested trace per turn), JSON logs, 6 log metrics, 6 alert policies, dashboard | |
 | Infra / CI | Terraform (services, job, scheduler, Firestore, secrets, IAM, alerts, budget); GitHub Actions CI + manual security gate | |
 
