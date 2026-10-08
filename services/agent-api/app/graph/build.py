@@ -375,11 +375,11 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
             if random.random() < 0.5:
                 write({"type": "delta", "text": EASTER_TEXT})
                 return {"answer": EASTER_TEXT, "chunks": [], "links": []}
-            text = EASTER_FALLBACK
+            text = EASTER_TEXT
             write({"type": "delta", "text": text})
             return {"answer": text, "chunks": [], "links": [EASTER_CREDIT],
-                    "image": {"url": settings.easter_image_url, "alt": EASTER_FALLBACK,
-                              "fallback": EASTER_FALLBACK}}
+                    "image": {"url": settings.easter_image_url, "alt": EASTER_TEXT,
+                              "fallback": EASTER_TEXT}}
         if intent != "question":
             write({"type": "delta", "text": CANNED[intent]})
             links = ([{"label": "Open the booking page", "url": settings.booking_page_url}]
@@ -893,8 +893,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
 
 # A fixed reply to one fixed sentence (a joke from the site's owner): no model is involved.
 EASTER = re.compile(r"\W*i\s+underestimated\s+you\W*", re.IGNORECASE)
-EASTER_TEXT = "Maybe next time you will estimate me."
-EASTER_FALLBACK = "Yeah, well, maybe next time you will estimate me."
+EASTER_TEXT = "Yeah, well, maybe next time you will estimate me."
 EASTER_CREDIT = {"label": "Image: r/DunderMifflin",
                  "url": "https://www.reddit.com/r/DunderMifflin/comments/1ec5z4o/after_people_do_a_rewatch_and_say_they/"}
 TODAY_TOMORROW = re.compile(r"\b(tomorrow|today)\b", re.IGNORECASE)
