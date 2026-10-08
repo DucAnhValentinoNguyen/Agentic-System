@@ -212,10 +212,20 @@ def find_slots(day: str = "", after: str = "", before: str = "") -> str:
     window = " ".join(x for x in (f"after {after}" if after else "", f"before {before}" if before else "") if x)
     label = (d.strftime("%a %d %b") + " " if d else "") + window
     hits = [t for t in free if inside(t) and (d is None or t.date() == d)]
+    ranges: list[str] = []                       # one day: "10:00-12:00" blocks of consecutive free half hours
+    if d is not None:
+        start = prev = None
+        for t in hits + [None]:
+            if start is not None and (t is None or t != prev + sl.SLOT):
+                ranges.append(f"{start:%H:%M}\u2013{prev + sl.SLOT:%H:%M}")
+                start = None
+            if t is not None and start is None:
+                start = t
+            prev = t if t is not None else prev
     if len(hits) > 8:
         hits = hits[:4] + hits[-4:] if d else hits[:8]
     if hits:
-        return _out(status="ok", label=label.strip(), slots=[row(t) for t in hits], reason="", why="", next=[])
+        return _out(status="ok", label=label.strip(), slots=[row(t) for t in hits], ranges=ranges, reason="", why="", next=[])
     work_end, work_start = sl.RULES.work_end, sl.RULES.work_start
     if (lo is not None and lo[0] >= work_end) or (hi is not None and (hi[0], hi[1]) <= (work_start, 0)):
         reason = "hours"
@@ -225,7 +235,8 @@ def find_slots(day: str = "", after: str = "", before: str = "") -> str:
     else:
         reason = "window"
     later = [t for t in free if inside(t) and (d is None or t.date() > d)][:4]
-    return _out(status="ok", label=label.strip(), slots=[], reason=reason, why=sl.reason_text(reason), next=[row(t) for t in later])
+    return _out(status="ok", label=label.strip(), slots=[], ranges=[], reason=reason, why=sl.reason_text(reason),
+                next=[row(t) for t in later])
 
 
 @mcp.tool()

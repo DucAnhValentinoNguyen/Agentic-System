@@ -619,7 +619,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             known = SAME.format(**last) if last else ""
             today = dt.datetime.now(sl.TZ).strftime("%A %Y-%m-%d %H:%M")
             msgs = [{"role": "system", "content": with_summary(EXTRACT.format(
-                        slots=[f"{i + 1}. {x['label']}" for i, x in enumerate(slots)] or "none yet",
+                        slots=f"none; day under discussion: {b.get('day') or 'none'}",
                         known=known, today=today), state)},
                     *state.get("history", [])[-settings.history_window:], {"role": "user", "content": state["question"]}]
             try:
@@ -716,39 +716,58 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         missing = [k for k in ("name", "email", "topic") if not b.get(k)]
         ask_details = " To book one, tell me your name, your email address and what it is about." if missing else ""
 
-        # ---- Availability questions need no personal details, so they are answered first, with the reason when
-        # the answer is no (notice period, weekend, outside hours, taken). A time they pick is remembered. ----
+        # ---- Availability questions need no personal details, so they are answered first. One day: say from which time to
+        # which time Duc-Anh is free, in words (no chips). Anything wider than a day: hand over his calendar. ----
+        page = ([{"label": "Open his calendar", "url": settings.booking_page_url}] if settings.booking_page_url else [])
+        today = dt.datetime.now(sl.TZ).date()
         after, before = time_window(qs)
         if not (after or before) and re.search(r"\d", qs):
             after, before = (f.after_time or "", f.before_time or "")      # the model's reading, only when this message has a time
-        later_day = ""
-        if not (after or before) and slots and LATER.search(qs):
-            # "how about later": more times after the last one shown, the same day if any are left
-            last_shown = dt.datetime.fromisoformat(slots[-1]["start"])
-            after, later_day = (last_shown + sl.SLOT).strftime("%H:%M"), last_shown.date().isoformat()
-            if (last_shown + sl.SLOT).hour >= sl.RULES.work_end:
-                return say("Those are the latest times that day. Tell me another day, for example \"Tuesday\", "
-                           "or a time like \"Thursday at 11\"." + ask_details, [x["label"] for x in slots], booking=b)
-        if (after or before) and not b.get("chosen") and not f.slot_choice:
-            day_iso = (f.requested_date or (f.requested_start or "")[:10]
-                       or named_weekday(qs, dt.datetime.now(sl.TZ).date()) or later_day)
+        day_iso = f.requested_date or (f.requested_start or "")[:10] or named_weekday(qs, today) or ""
+        if not f.requested_start and not (after or before) and b.get("day") and (m := TIME_ONLY.match(qs)):
+            # "2pm" or "is 14:30 good?" right after a day was discussed: that day, at that time
+            hhmm = _hhmm(m.group(1), m.group(2), m.group(3))
+            if hhmm:
+                f.requested_start = dt.datetime.fromisoformat(f"{b['day']}T{hhmm}:00").replace(tzinfo=sl.TZ).isoformat()
+        if BROAD.search(qs) and not b.get("chosen"):
+            b["misses"] = b.get("misses", 0) + 1
+            b["stage"] = "choosing"
+            return say("For a better overview of his week please check his calendar"
+                       + (f": {settings.booking_page_url}" if page else ".")
+                       + " Or tell me one day and I'll say when he is free." + ask_details, booking=b, links=page)
+
+        def free_text(info: dict) -> str:
+            label = info["label"]
+            if info.get("ranges"):
+                return f"On {label} Duc-Anh is free {_join(info['ranges'])} (Berlin time)."
+            return f"Nothing is free on {label}: {info['why']}."
+
+        async def day_answer(day: str, lo: str, hi: str) -> dict | None:
             try:
-                info = await calendar.find_slots(day_iso, after, before)
+                info = await calendar.find_slots(day, lo, hi)
             except Exception as e:  # noqa: BLE001
                 log.error("find_slots_failed", error=str(e)[:200])
-                info = {"status": "failed"}
-            if info.get("status") == "ok":
-                shown = info.get("slots") or info.get("next") or []
-                if not info.get("slots"):
+                return None
+            return info if info.get("status") == "ok" else None
+
+        if (after or before or f.requested_date) and not f.requested_start and not b.get("chosen"):
+            day_iso = day_iso or b.get("day") or ""
+            if not day_iso:                                   # a time of day with no day: too wide to answer here
+                b["misses"] = b.get("misses", 0) + 1
+                b["stage"] = "choosing"
+                return say("Which day do you have in mind? I can tell you when he is free on a given day. "
+                           + ("For a better overview of his week please check his calendar: "
+                              f"{settings.booking_page_url}" if page else "") + ask_details, booking=b, links=page)
+            info = await day_answer(day_iso, after, before)
+            if info:
+                b["day"], b["stage"] = day_iso, "choosing"
+                if not info.get("ranges"):
                     b["misses"] = b.get("misses", 0) + 1
-                if shown:
-                    b["slots"], b["stage"] = shown, "choosing"
-                    text = (f"These times are free {info['label']}. Pick one, or type another time." if info.get("slots")
-                            else f"Nothing is free {info['label']}: {info['why']}. The closest free times are:")
-                    return say(text + ask_details, [x["label"] for x in shown], booking=b)
-                return say(f"Nothing can be booked {info['label']}: {info['why']}. Try another day or time, "
-                           f"or email {settings.contact_email}.", booking=b)
-        if f.requested_start and not b.get("chosen") and not (after or before):
+                tail = ("Tell me the time that suits you and I'll check it." if info.get("ranges") else
+                        "Try another day, or " + (f"see his calendar: {settings.booking_page_url}" if page
+                                                  else f"email {settings.contact_email}") + ".")
+                return say(f"{free_text(info)} {tail}" + ask_details, booking=b, links=page if not info.get("ranges") else [])
+        if f.requested_start and not b.get("chosen"):
             try:
                 req_dt = dt.datetime.fromisoformat(f.requested_start)
             except ValueError:
@@ -761,43 +780,17 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                     chk = {"status": "failed"}
                 if chk.get("status") == "free":
                     b["chosen"] = {"start": req_dt.isoformat(), "label": chk["label"], "max_slots": chk["max_slots"]}
+                    b["day"] = req_dt.date().isoformat()
                 elif chk.get("status") == "busy":
-                    nearby = chk.get("nearby") or []
-                    b["slots"] = slots = nearby
-                    b["stage"] = "choosing"
-                    why = f": {chk['why']}" if chk.get("why") else ""
+                    b["day"], b["stage"] = req_dt.date().isoformat(), "choosing"
                     b["misses"] = b.get("misses", 0) + 1
-                    if nearby:
-                        return say(f"{sl.label(req_dt)} isn't available{why}. Here are free times nearby:" + ask_details,
-                                   [x["label"] for x in slots], booking=b)
-                    return say(f"{sl.label(req_dt)} isn't available{why}, and I couldn't find a nearby free time. "
-                               f"Please email {settings.contact_email}.", booking={})
-                # status "invalid" or "failed": fall through to the normal offered-slots path below
-        elif f.requested_date and not b.get("chosen") and not (after or before):
-            try:
-                day = dt.date.fromisoformat(f.requested_date)
-            except ValueError:
-                day = None
-            if day:
-                try:
-                    info = await calendar.check_day(day.isoformat())
-                except Exception as e:  # noqa: BLE001
-                    log.error("check_day_failed", error=str(e)[:200])
-                    info = {"status": "failed"}
-                if info.get("status") == "ok":
-                    shown = info.get("slots") or info.get("next") or []
-                    b["slots"] = slots = shown
-                    b["stage"] = "choosing"
-                    if not info.get("slots"):
-                        b["misses"] = b.get("misses", 0) + 1
-                    if info.get("slots"):
-                        text = f"On {info['label']} these times are free. Pick one, or type another time."
-                    elif shown:
-                        text = f"Nothing can be booked on {info['label']}: {info['why']}. The next free times are:"
-                    else:
-                        return say(f"Nothing can be booked on {info['label']}: {info['why']}. "
-                                   f"Please email {settings.contact_email}.", booking={})
-                    return say(text + ask_details, [x["label"] for x in shown], booking=b)
+                    why = f": {chk['why']}" if chk.get("why") else ""
+                    info = await day_answer(b["day"], "", "")
+                    more = (f" {free_text(info)}" if info and info.get("ranges") else
+                            (" Please see his calendar: " + settings.booking_page_url if page else ""))
+                    return say(f"{sl.label(req_dt)} isn't available{why}.{more}" + ask_details, booking=b,
+                               links=[] if info and info.get("ranges") else page)
+                # status "invalid" or "failed": fall through
         if f.slot_choice and 1 <= f.slot_choice <= len(slots) and not b.get("chosen"):
             b["chosen"] = slots[f.slot_choice - 1]
         if missing:
@@ -806,22 +799,14 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             return say(f"Happy to set up a call with Duc-Anh{when}. Could you tell me "
                        + " and ".join(ASK[x] for x in missing) + "?", booking=b)
 
-        if not slots and not b.get("chosen"):
-            try:
-                b["slots"] = slots = await calendar.free_slots()
-            except Exception as e:  # noqa: BLE001
-                log.error("slots_failed", error=str(e)[:200])
-                return say("I couldn't read the calendar just now. Please email "
-                           f"{settings.contact_email} instead.", booking={})
-            if not slots:
-                return say(f"There are no free slots in the next week. Please email {settings.contact_email}.",
-                           booking={})
-            b["stage"] = "choosing"
-            intro = ("Thanks! These times are free." if not b.pop("reused", False) else
-                     f"I'll use your details from earlier ({b['name']}, {b['email']}, \"{b['topic']}\"); "
-                     "tell me if any changed. These times are free.")
-            return say(f"{intro} Pick one, or type a day and time that suits you and I'll check it.",
-                       [x["label"] for x in slots], booking=b)
+        if not b.get("chosen") and not b.get("asked_when"):
+            b["stage"], b["asked_when"] = "choosing", True
+            intro = ("Thanks!" if not b.pop("reused", False) else
+                     f"I'll use your details from earlier ({b['name']}, {b['email']}, \"{b['topic']}\"); tell me if any changed.")
+            return say(f"{intro} Which day and time suits you? For example \"Thursday at 3pm\", and I'll check it. "
+                       "You can also ask when he is free on a day"
+                       + (f", or see his whole week in his calendar: {settings.booking_page_url}." if page else "."),
+                       booking=b, links=page)
         if f.slot_choice and 1 <= f.slot_choice <= len(slots):
             b["chosen"] = slots[f.slot_choice - 1]
         if b.get("chosen"):
@@ -858,9 +843,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             out["history"] = [{"role": "user", "content": state["question"]}, {"role": "assistant", "content": text}]
             return out
         b["stage"] = "choosing"
-        b["misses"] = b.get("misses", 0) + 1       # they typed something that did not pick or name a time
-        return say("Which of these times works for you? You can also type a day and time, "
-                   "for example \"Thursday at 3pm\", and I'll check it.", [x["label"] for x in slots], booking=b)
+        b["misses"] = b.get("misses", 0) + 1       # they typed something that did not name a day or a time
+        return say("Tell me a day and time, for example \"Thursday at 3pm\", or ask when he is free on a day"
+                   + (f". For a better overview of his week: {settings.booking_page_url}" if page else "."),
+                   booking=b, links=page)
 
     async def book_confirm(state: State) -> dict:
         # Pauses the graph. Nothing runs before interrupt(), so the resume replay is side-effect free.
@@ -956,7 +942,16 @@ AFTER_TIME = re.compile(r"\b(?:after|from|later than)\s+(\d{1,2})(?::(\d{2}))?\s
 BEFORE_TIME = re.compile(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|h|uhr)?\b|\bbefore\s+(noon)\b", re.IGNORECASE)
 PART_OF_DAY = {"morning": ("", "12:00"), "afternoon": ("12:00", ""), "evening": ("17:00", ""), "noon": ("12:00", "")}
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-LATER = re.compile(r"\b(later|other times|more times|something else|different time)\b", re.IGNORECASE)
+BROAD = re.compile(r"\b(next week|this week|the week|whole week|all week|other days|any other day|any day|which days|what days|"
+                   r"week after|weeks?\s+(?:from|after)|\w+day week|anytime|any time)\b", re.IGNORECASE)
+TIME_ONLY = re.compile(r"^\s*(?:is |how about |what about |at |around |maybe )*(\d{1,2})(?::(\d{2}))?\s*(am|pm|h|uhr)?"
+                       r"(?:\s+(?:is |would be )?(?:good|ok|okay|fine|possible|free))?\s*\??\s*$", re.IGNORECASE)
+
+
+def _join(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
 ASK_LINK = re.compile(r"\b(booking|calendar|appointment)\s+(link|page)\b|\bhow\s+(do|can)\s+i\s+(schedule|book)\b|\bgive me (the |a )?link\b",
                       re.IGNORECASE)
 NUDGE_AFTER = 5

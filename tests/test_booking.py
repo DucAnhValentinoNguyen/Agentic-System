@@ -387,3 +387,12 @@ def test_find_slots_filters_by_time_of_day_and_says_why_nothing_fits(cal, monkey
     anyday = json.loads(m.find_slots(after="16:00"))
     assert anyday["slots"] and all(s["start"][11:16] >= "16:00" for s in anyday["slots"])
     assert json.loads(m.find_slots("nope"))["status"] == "invalid"
+
+
+def test_find_slots_reports_one_days_free_time_as_ranges(cal, monkeypatch):
+    monkeypatch.setattr(m, "_now", lambda: NOW9)
+    monkeypatch.setattr(m, "_free", lambda: [t for t in FREE9 if t != day(2026, 10, 13, 12)])   # 12:00 is taken
+    r = json.loads(m.find_slots("2026-10-13"))
+    assert r["ranges"][0] == "10:00–12:00" and len(r["ranges"]) >= 2                          # a gap splits the range
+    late = json.loads(m.find_slots("2026-10-13", after="15:00"))
+    assert late["ranges"] and late["ranges"][0].startswith("15:00") and late["ranges"][-1].endswith("17:00")

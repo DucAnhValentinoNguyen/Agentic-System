@@ -35,6 +35,9 @@ class Cal:
     async def free_slots(self):
         return SLOTS
 
+    async def check_time(self, start, slots=1):
+        return {"status": "free", "label": SLOTS[0]["label"], "max_slots": 3}
+
     async def allowance(self, email):
         return {"status": "ok", "held": 0, "remaining": 3}
 
@@ -72,7 +75,8 @@ async def test_a_booking_confirmed_on_another_instance_is_created():
     await say(a, cfg, "book a call")
     router.extract = {"name": "Ann", "email": "ann@example.com", "topic": "thesis"}
     await say(a, cfg, "Book it for me here")
-    out = await say(b, cfg, SLOTS[0]["label"])                         # the next message lands on instance B
+    router.extract = {"requested_start": START}
+    out = await say(b, cfg, "Tuesday at 10")                           # the next message lands on instance B
     assert out["choices"] == ["30 min", "60 min", "90 min"]
     router.extract = {}
     out = await say(a, cfg, "30 min")                                  # and back on A: the graph is paused at confirm
