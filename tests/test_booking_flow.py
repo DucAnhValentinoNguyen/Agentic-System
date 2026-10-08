@@ -503,3 +503,43 @@ async def test_the_models_stale_window_is_ignored_when_the_message_has_no_time(c
     cal.found = None
     await turn("how about the one on wednesday", {"after_time": "16:00"})
     assert cal.found is None
+
+
+from app.config import settings
+
+PAGE_URL = "https://calendar.app.google/uUFu1xoy2RZR3Rrh6"
+
+
+async def test_the_booking_link_is_given_whenever_it_is_asked_for_even_mid_booking(chat, monkeypatch):
+    monkeypatch.setattr(settings, "booking_page_url", PAGE_URL)
+    turn, _ = chat
+    await book_one_details(turn)                                    # now choosing from a list of times
+    out = await turn("How do I schedule a meeting with him?")
+    assert out["links"] == [{"label": "Open the booking page", "url": PAGE_URL}]
+    assert out["choices"] == [x["label"] for x in SLOTS]            # the list stays, nothing is lost
+    out = await turn("Give me the booking link")
+    assert out["links"][0]["url"] == PAGE_URL
+
+
+async def test_after_five_failed_tries_twin_admits_it_and_offers_the_link_once(chat, monkeypatch):
+    monkeypatch.setattr(settings, "booking_page_url", PAGE_URL)
+    turn, _ = chat
+    await book_one_details(turn)
+    for i in range(4):
+        out = await turn(f"hmm not sure {i}")
+        assert "terrible at this" not in out["answer"]
+    out = await turn("not that either")
+    assert "Oh dear, I am terrible at this" in out["answer"] and PAGE_URL in out["answer"]
+    assert out["links"][0]["url"] == PAGE_URL
+    out = await turn("still no")
+    assert "terrible at this" not in out["answer"]                  # said once, not on every turn
+
+
+async def test_a_normal_booking_never_triggers_the_apology(chat, monkeypatch):
+    monkeypatch.setattr(settings, "booking_page_url", PAGE_URL)
+    turn, _ = chat
+    await book_one_details(turn)
+    out = await turn(SLOTS[0]["label"], {"slot_choice": 1})
+    await turn("30 min")
+    out = await turn("Yes, book it")
+    assert "terrible" not in out["answer"]

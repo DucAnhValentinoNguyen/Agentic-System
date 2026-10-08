@@ -113,3 +113,13 @@ def test_rate_limited_clients_are_turned_away(cal):
     app = FastAPI()
     app.include_router(cx.make_router(lambda: Cal(), lambda: SECRET, lambda request: True))
     assert TestClient(app).get("/v1/cancel", params={"t": "x"}).status_code == 429
+
+
+def test_status_says_whether_the_call_is_still_booked(client):
+    book()
+    token = cx.sign(cx.event_id("a@b.co", T.isoformat()), SECRET)
+    assert client.get("/v1/cancel/status", params={"t": token}).json() == {"active": True}
+    client.post("/v1/cancel", content=f"t={token}", headers={"content-type": "application/x-www-form-urlencoded"})
+    assert client.get("/v1/cancel/status", params={"t": token}).json() == {"active": False}
+    assert client.get("/v1/cancel/status", params={"t": "forged"}).json() == {"active": False}   # a made-up link is not a call
+    assert client.get("/v1/cancel/status", params={"t": token}).headers["cache-control"] == "no-store"

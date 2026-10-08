@@ -12,7 +12,7 @@ import re
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 EVENT_ID = re.compile(r"[a-f0-9]{32}")
 
@@ -85,6 +85,22 @@ def make_router(get_calendar, get_secret, limited) -> APIRouter:
         if res["status"] in ("cancelled", "already_cancelled"):
             return page("Cancelled", f"<p>Your call on {html.escape(info.get('label', ''))} is cancelled.</p>")
         return page("Something went wrong", "<p>The call could not be cancelled. Please email Duc-Anh.</p>", 502)
+
+    @router.get("/v1/cancel/status")
+    async def status(request: Request, t: str = ""):
+        """Is the call behind this link still booked? Lets the widget drop its "My call" button once it is not (cancelled
+        in the chat, from the link, or deleted from the calendar). Reads only; the token is the same signed one."""
+        headers = {"Cache-Control": "no-store"}
+        if limited(request):
+            return JSONResponse({"active": True}, status_code=429, headers=headers)   # unknown, so keep the button
+        eid = verify(t, get_secret())
+        if not eid:
+            return JSONResponse({"active": False}, status_code=404, headers=headers)
+        try:
+            info = await get_calendar().booking_info(eid)
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"active": True}, status_code=502, headers=headers)
+        return JSONResponse({"active": info["status"] == "ok"}, headers=headers)
 
     @router.get("/v1/cancel")
     async def show(request: Request, t: str = ""):

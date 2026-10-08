@@ -567,6 +567,11 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         recs: list[CallRecord] = []
 
         def say(text: str, choices: list[str] | None = None, **extra) -> dict:
+            if extra.get("booking") is b and b.get("misses", 0) >= NUDGE_AFTER and not b.get("nudged") and settings.booking_page_url:
+                # They have gone back and forth without agreeing a time: hand over a link that always works.
+                b["nudged"] = True
+                text += NUDGE.format(url=settings.booking_page_url)
+                extra["links"] = [{"label": "Open the booking page", "url": settings.booking_page_url}]
             write({"type": "delta", "text": text})
             if choices:
                 write({"type": "choices", "options": choices})
@@ -580,6 +585,16 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                            ["Cancel that call", "Book another time"], booking={})
             return say("I don't have a call booked for you in this chat. I only know about calls that I booked here; "
                        f"for anything else please email {settings.contact_email}.", ["Book a call"], booking={})
+        if ASK_LINK.search(qs) and (b.get("stage") or last) and settings.booking_page_url:
+            # Asked for the way to book while a booking is already going on: the link is always the first thing they get.
+            text = ("Here is Duc-Anh's booking page, where you can pick any free time yourself. "
+                    "Or we can carry on here in the chat.")
+            write({"type": "delta", "text": text})
+            if b.get("slots") and b.get("stage") == "choosing":
+                write({"type": "choices", "options": [x["label"] for x in b["slots"]]})
+            return {"answer": text, "choices": [x["label"] for x in b.get("slots", [])] if b.get("stage") == "choosing" else [],
+                    "confirmed": None, "records": [], "booking": b, "visitor": state.get("visitor") or {},
+                    "links": [{"label": "Open the booking page", "url": settings.booking_page_url}]}
         if not b.get("stage") and not last:
             # A fresh request: point to the booking page first, and offer to do it right here.
             links = ([{"label": "Open the booking page", "url": settings.booking_page_url}]
@@ -724,6 +739,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                 info = {"status": "failed"}
             if info.get("status") == "ok":
                 shown = info.get("slots") or info.get("next") or []
+                if not info.get("slots"):
+                    b["misses"] = b.get("misses", 0) + 1
                 if shown:
                     b["slots"], b["stage"] = shown, "choosing"
                     text = (f"These times are free {info['label']}. Pick one, or type another time." if info.get("slots")
@@ -749,6 +766,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                     b["slots"] = slots = nearby
                     b["stage"] = "choosing"
                     why = f": {chk['why']}" if chk.get("why") else ""
+                    b["misses"] = b.get("misses", 0) + 1
                     if nearby:
                         return say(f"{sl.label(req_dt)} isn't available{why}. Here are free times nearby:" + ask_details,
                                    [x["label"] for x in slots], booking=b)
@@ -770,6 +788,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                     shown = info.get("slots") or info.get("next") or []
                     b["slots"] = slots = shown
                     b["stage"] = "choosing"
+                    if not info.get("slots"):
+                        b["misses"] = b.get("misses", 0) + 1
                     if info.get("slots"):
                         text = f"On {info['label']} these times are free. Pick one, or type another time."
                     elif shown:
@@ -838,6 +858,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             out["history"] = [{"role": "user", "content": state["question"]}, {"role": "assistant", "content": text}]
             return out
         b["stage"] = "choosing"
+        b["misses"] = b.get("misses", 0) + 1       # they typed something that did not pick or name a time
         return say("Which of these times works for you? You can also type a day and time, "
                    "for example \"Thursday at 3pm\", and I'll check it.", [x["label"] for x in slots], booking=b)
 
@@ -936,6 +957,10 @@ BEFORE_TIME = re.compile(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|h|uhr)?\b|
 PART_OF_DAY = {"morning": ("", "12:00"), "afternoon": ("12:00", ""), "evening": ("17:00", ""), "noon": ("12:00", "")}
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 LATER = re.compile(r"\b(later|other times|more times|something else|different time)\b", re.IGNORECASE)
+ASK_LINK = re.compile(r"\b(booking|calendar|appointment)\s+(link|page)\b|\bhow\s+(do|can)\s+i\s+(schedule|book)\b|\bgive me (the |a )?link\b",
+                      re.IGNORECASE)
+NUDGE_AFTER = 5
+NUDGE = (" Oh dear, I am terrible at this. Booking directly with this link would be better: {url}")
 EMAIL_IN_TEXT = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 

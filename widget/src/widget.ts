@@ -143,6 +143,7 @@ function mount(): void {
   const mic = root.querySelector(".mic") as HTMLButtonElement;
   const voiceStatus = root.querySelector(".voice-status") as HTMLDivElement;
   const connection = root.querySelector(".connection") as HTMLSpanElement;
+  let recheckBooking: () => void = () => {};
   let rememberBooking: (l: { url: string; note?: string; until?: string }) => void = () => {};
   const sid = sessionId();
 
@@ -315,6 +316,7 @@ function mount(): void {
       logEl.scrollTop = logEl.scrollHeight;
     } else if (ev.type === "done") {
       finish(ev.text, ev.citations, ev.choices, ev.links, ev.trace_id, ev.image);
+      recheckBooking();
     } else if (ev.type === "transcript") {
       if (pending.userEl) pending.userEl.textContent = ev.text;
       pending.text = ev.text;
@@ -700,6 +702,21 @@ function mount(): void {
     showBooking();
   };
   showBooking();
+  // The button must not outlive the call: ask the server whether it is still booked (it may have been cancelled in the
+  // chat, from the link, or in the calendar). Only a clear "no" removes it; a network error keeps it.
+  const verifyBooking = (): void => {
+    let b: { url: string } | null = null;
+    try { b = JSON.parse(store.get("twin-booking", localStorage) || "null"); } catch { b = null; }
+    if (!b || !b.url) return;
+    fetch(b.url.replace("/v1/cancel?", "/v1/cancel/status?"), { signal: AbortSignal.timeout(10000) })
+      .then((r) => (r.ok || r.status === 404 ? r.json() : null))
+      .then((j: { active?: boolean } | null) => {
+        if (j && j.active === false) { try { localStorage.removeItem("twin-booking"); } catch { /* ignore */ } showBooking(); }
+      })
+      .catch(() => undefined);
+  };
+  verifyBooking();
+  recheckBooking = verifyBooking;
   // Always visible, unlike the example chips: one tap starts a problem report that is emailed to Duc-Anh.
   (root.querySelector(".report") as HTMLButtonElement).onclick = () => ask("Report an issue with this chatbot to Duc-Anh");
   const paintExpand = (): void => {

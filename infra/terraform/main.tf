@@ -23,7 +23,7 @@ variable "alert_email" { description = "Where alerts and budget emails go (set A
 variable "fault_inject" { default = "" }
 variable "rate_per_minute" { default = 12 } # per IP; raised only during load tests
 variable "throttle_cooldown_s" { default = 10 }
-variable "booking_page_url" { default = "https://calendar.app.google/fE5TZPUmwwr3Rpn49" } # Duc-Anh's own appointment page
+variable "booking_page_url" { default = "https://calendar.app.google/uUFu1xoy2RZR3Rrh6" } # Duc-Anh's own appointment page
 variable "ab_variant" { default = "A" }                                                   # A = plain RAG; B = RAG + claim verification; auto = 50/50 split
 
 provider "google" {
