@@ -58,7 +58,7 @@ async def test_the_picture_reply_carries_the_credit_and_a_text_fallback(monkeypa
     final, router = await ask("i underestimated you.")
     assert router.calls == 0
     assert final["image"]["url"] == "https://site.example/assets/estimate-me.jpg"
-    assert final["image"]["fallback"] == EASTER_TEXT                    # shown if the picture cannot be loaded
+    assert final["image"]["fallback"] == "Yeah, well, maybe next time you will estimate me."                    # shown if the picture cannot be loaded
     assert final["links"][0]["url"].startswith("https://www.reddit.com/r/DunderMifflin/")
 
 
