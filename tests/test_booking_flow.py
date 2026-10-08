@@ -492,7 +492,7 @@ async def test_a_question_about_the_wider_week_hands_over_the_calendar(chat, mon
     turn, cal = chat
     await book_one_details(turn)
     out = await turn("how about other days of next week, anything after 3pm is good")
-    assert "For a better overview of his week please check his calendar" in out["answer"] and PAGE_URL in out["answer"]
+    assert "For a better overview of his week please check his calendar" in out["answer"]
     assert out["links"][0]["url"] == PAGE_URL and out["choices"] == [] and cal.found is None
 
 
@@ -552,7 +552,7 @@ async def test_after_five_failed_tries_twin_admits_it_and_offers_the_link_once(c
         out = await turn(f"hmm not sure {i}")
         assert "terrible at this" not in out["answer"]
     out = await turn("not that either")
-    assert "Oh dear, I am terrible at this" in out["answer"] and PAGE_URL in out["answer"]
+    assert "Oh dear, I am terrible at this" in out["answer"]
     assert out["links"][0]["url"] == PAGE_URL
     out = await turn("still no")
     assert "terrible at this" not in out["answer"]                  # said once, not on every turn
@@ -596,3 +596,22 @@ async def test_a_plain_no_at_the_confirm_step_still_declines(chat):
     await turn("30 min")
     out = await turn("No, cancel")
     assert cal.created == [] and "haven't changed anything" in out["answer"]
+
+
+async def test_anytime_on_one_day_is_not_a_whole_week_question(chat, monkeypatch):
+    monkeypatch.setattr(settings, "booking_page_url", PAGE_URL)
+    turn, cal = chat
+    await book_one_details(turn)
+    out = await turn("anytime on tuesday after 2pm is good")
+    assert cal.found is not None and "free" in out["answer"] and "overview of his week" not in out["answer"]
+    assert PAGE_URL not in out["answer"]                                  # the button carries the link, the text does not
+
+
+async def test_no_reply_pastes_the_calendar_link_into_the_text(chat, monkeypatch):
+    monkeypatch.setattr(settings, "booking_page_url", PAGE_URL)
+    turn, _ = chat
+    await turn("book a call")
+    out = await turn("Book it for me here", DETAILS)
+    assert PAGE_URL not in out["answer"] and out["links"][0]["url"] == PAGE_URL
+    out = await turn("how about next week")
+    assert PAGE_URL not in out["answer"] and out["links"][0]["url"] == PAGE_URL

@@ -572,7 +572,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             if extra.get("booking") is b and b.get("misses", 0) >= NUDGE_AFTER and not b.get("nudged") and settings.booking_page_url:
                 # They have gone back and forth without agreeing a time: hand over a link that always works.
                 b["nudged"] = True
-                text += NUDGE.format(url=settings.booking_page_url)
+                text += NUDGE
                 extra["links"] = [{"label": "Open the booking page", "url": settings.booking_page_url}]
             write({"type": "delta", "text": text})
             if choices:
@@ -739,7 +739,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             b["misses"] = b.get("misses", 0) + 1
             b["stage"] = "choosing"
             return say("For a better overview of his week please check his calendar"
-                       + (f": {settings.booking_page_url}." if page else ".")
+                       + "."
                        + " Or tell me one day and I'll say when he is free." + ask_details, booking=b, links=page)
 
         def free_text(info: dict) -> str:
@@ -762,16 +762,14 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                 b["misses"] = b.get("misses", 0) + 1
                 b["stage"] = "choosing"
                 return say("Which day do you have in mind? I can tell you when he is free on a given day. "
-                           + ("For a better overview of his week please check his calendar: "
-                              f"{settings.booking_page_url}" if page else "") + ask_details, booking=b, links=page)
+                           + ("For a better overview of his week please check his calendar." if page else "") + ask_details, booking=b, links=page)
             info = await day_answer(day_iso, after, before)
             if info:
                 b["day"], b["stage"] = day_iso, "choosing"
                 if not info.get("ranges"):
                     b["misses"] = b.get("misses", 0) + 1
                 tail = ("Tell me the time that suits you and I'll check it." if info.get("ranges") else
-                        "Try another day, or " + (f"see his calendar: {settings.booking_page_url}" if page
-                                                  else f"email {settings.contact_email}") + ".")
+                        "Try another day, or " + ("see his calendar below" if page else f"email {settings.contact_email}") + ".")
                 return say(f"{free_text(info)} {tail}" + ask_details, booking=b, links=page if not info.get("ranges") else [])
         if f.requested_start and not b.get("chosen"):
             try:
@@ -811,7 +809,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                      f"I'll use your details from earlier ({b['name']}, {b['email']}, \"{b['topic']}\"); tell me if any changed.")
             return say(f"{intro} Which day and time suits you? For example \"Thursday at 3pm\", and I'll check it. "
                        "You can also ask when he is free on a day"
-                       + (f", or see his whole week in his calendar: {settings.booking_page_url}." if page else "."),
+                       + (", or see his whole week in his calendar below." if page else "."),
                        booking=b, links=page)
         if f.slot_choice and 1 <= f.slot_choice <= len(slots):
             b["chosen"] = slots[f.slot_choice - 1]
@@ -851,7 +849,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         b["stage"] = "choosing"
         b["misses"] = b.get("misses", 0) + 1       # they typed something that did not name a day or a time
         return say("Tell me a day and time, for example \"Thursday at 3pm\", or ask when he is free on a day"
-                   + (f". For a better overview of his week: {settings.booking_page_url}" if page else "."),
+                   + (". For a better overview of his week, open his calendar below." if page else "."),
                    booking=b, links=page)
 
     async def book_confirm(state: State) -> dict:
@@ -952,7 +950,7 @@ BEFORE_TIME = re.compile(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|h|uhr)?\b|
 PART_OF_DAY = {"morning": ("", "12:00"), "afternoon": ("12:00", ""), "evening": ("17:00", ""), "noon": ("12:00", "")}
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 BROAD = re.compile(r"\b(next week|this week|the week|whole week|all week|other days|any other day|any day|which days|what days|"
-                   r"week after|weeks?\s+(?:from|after)|\w+day week|anytime|any time)\b", re.IGNORECASE)
+                   r"week after|weeks?\s+(?:from|after)|\w+day week)\b", re.IGNORECASE)
 TIME_ONLY = re.compile(r"^\s*(?:is |how about |what about |at |around |maybe )*(\d{1,2})(?::(\d{2}))?\s*(am|pm|h|uhr)?"
                        r"(?:\s+(?:is |would be )?(?:good|ok|okay|fine|possible|free))?\s*\??\s*$", re.IGNORECASE)
 
@@ -964,7 +962,7 @@ def _join(items: list[str]) -> str:
 ASK_LINK = re.compile(r"\b(booking|calendar|appointment)\s+(link|page)\b|\bhow\s+(do|can)\s+i\s+(schedule|book)\b|\bgive me (the |a )?link\b",
                       re.IGNORECASE)
 NUDGE_AFTER = 5
-NUDGE = (" Oh dear, I am terrible at this. Booking directly with this link would be better: {url}")
+NUDGE = " Oh dear, I am terrible at this. Booking directly in his calendar would be better, the button below opens it."
 CORRECTION = re.compile(r"\b(under|instead|change|changed|wrong|my (name|email|e-mail|topic)|use|correct)\b", re.IGNORECASE)
 EMAIL_IN_TEXT = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
