@@ -513,7 +513,9 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
     g.add_edge("msg_send", "finalize")
     g.add_conditional_edges("book_collect", lambda s: "book_confirm" if s.get("confirmed") is None
                             and (s["booking"] or {}).get("stage") == "proposed" else "finalize")
-    g.add_edge("book_confirm", "book_create")
+    # A reply that corrects the details ("no, under andy@example.com") goes back to collect and is confirmed again.
+    g.add_conditional_edges("book_confirm", lambda s: "book_collect" if s.get("confirmed") is None else "book_create",
+                            ["book_collect", "book_create"])
     g.add_edge("book_create", "finalize")
     g.add_edge("retrieve", "answer")
     g.add_conditional_edges("plan", after_plan, ["research", "retrieve"])
@@ -855,8 +857,11 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
     async def book_confirm(state: State) -> dict:
         # Pauses the graph. Nothing runs before interrupt(), so the resume replay is side-effect free.
         b = state["booking"]
-        reply = interrupt({"type": "confirm", "booking": b.get("chosen") or b.get("start")})
-        return {"confirmed": bool(bk.YES.match(str(reply))), "question": str(reply)}
+        reply = str(interrupt({"type": "confirm", "booking": b.get("chosen") or b.get("start")}))
+        if (not bk.YES.match(reply) and b.get("mode") not in ("cancel", "extend") and reply.strip() not in ("No, cancel", "No")
+                and (EMAIL_IN_TEXT.search(reply) or CORRECTION.search(reply))):
+            return {"confirmed": None, "question": reply, "booking": {**b, "stage": "collecting", "want": b.get("n") or b.get("want")}}
+        return {"confirmed": bool(bk.YES.match(reply)), "question": reply}
 
     async def book_create(state: State) -> dict:
         write = get_stream_writer()
@@ -960,6 +965,7 @@ ASK_LINK = re.compile(r"\b(booking|calendar|appointment)\s+(link|page)\b|\bhow\s
                       re.IGNORECASE)
 NUDGE_AFTER = 5
 NUDGE = (" Oh dear, I am terrible at this. Booking directly with this link would be better: {url}")
+CORRECTION = re.compile(r"\b(under|instead|change|changed|wrong|my (name|email|e-mail|topic)|use|correct)\b", re.IGNORECASE)
 EMAIL_IN_TEXT = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 

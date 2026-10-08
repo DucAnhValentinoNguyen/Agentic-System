@@ -453,7 +453,7 @@ async def test_tomorrow_is_understood_even_when_the_model_extracts_nothing(chat)
     turn, _ = chat
     await book_one_details(turn)
     out = await turn("so no more slot tomorrow?")                                          # the extractor returns nothing here
-    assert "Nothing is free on Fri 09 Oct" in out["answer"] and out["choices"] == []
+    assert "Nothing is free on" in out["answer"] and out["choices"] == []                  # whatever tomorrow is on the clock
     assert "Tell me a day and time" not in out["answer"]                                   # not the generic repeat
 
 
@@ -576,3 +576,23 @@ async def test_naming_another_time_instead_of_a_length_replaces_the_picked_time(
     await pick(turn, SLOTS[1])
     out = await turn("30 min")
     assert "Wed 07 Oct, 12:30" in out["answer"]
+
+
+async def test_correcting_the_name_or_email_at_the_confirm_step_updates_it_and_asks_again(chat):
+    turn, cal = chat
+    await book_one(turn)
+    out = await turn("30 min")
+    assert "Ann <ann@example.com>" in out["answer"]
+    out = await turn("no under andy at andy@lmu.com", {"name": "Andy", "email": "andy@lmu.com"})
+    assert "Andy <andy@lmu.com>" in out["answer"] and out["choices"] == ["Yes, book it", "No, cancel"]
+    assert cal.created == []                                                    # nothing booked on the old details
+    await turn("Yes, book it")
+    assert cal.created == [("Andy", "andy@lmu.com", "internship", START, 1)]
+
+
+async def test_a_plain_no_at_the_confirm_step_still_declines(chat):
+    turn, cal = chat
+    await book_one(turn)
+    await turn("30 min")
+    out = await turn("No, cancel")
+    assert cal.created == [] and "haven't changed anything" in out["answer"]
