@@ -425,3 +425,12 @@ async def test_a_time_picked_before_the_details_is_kept_while_they_are_collected
 async def book_one_details(turn):
     await turn("book a call")
     return await turn("Book it for me here", DETAILS)
+
+
+async def test_tomorrow_is_understood_even_when_the_model_extracts_nothing(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    out = await turn("so no more slot tomorrow?")                                          # the extractor returns nothing here
+    assert "Nothing can be booked on" in out["answer"] or "these times are free" in out["answer"]
+    assert out["choices"] != [s["label"] for s in SLOTS] or "free" in out["answer"]
+    assert "Which of these times works for you?" not in out["answer"]                      # not the generic repeat

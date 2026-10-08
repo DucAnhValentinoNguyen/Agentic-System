@@ -607,6 +607,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             f.slot_choice = int(qs)
         elif bk.YES.match(qs) or qs.lower().startswith("no") or chip_len or chip_extend:
             f.slot_choice = None
+        if not (f.requested_start or f.requested_date) and (word := TODAY_TOMORROW.search(qs)):
+            # "so no more slot tomorrow?": too short for the model to extract a date from, trivial to resolve here.
+            offset = 1 if word.group(1).lower() == "tomorrow" else 0
+            f.requested_date = (dt.datetime.now(sl.TZ).date() + dt.timedelta(days=offset)).isoformat()
         if f.cancel:
             if b.get("stage") in ("collecting", "choosing", "length"):
                 # Nothing was created yet, so there is nothing to undo. Never imply a booked call was cancelled.
@@ -874,6 +878,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
     return {"book_collect": book_collect, "book_confirm": book_confirm, "book_create": book_create}
 
 
+TODAY_TOMORROW = re.compile(r"\b(tomorrow|today)\b", re.IGNORECASE)
 ASK_EXISTING = re.compile(
     r"\b(when|what time)\b.{0,12}\b(is|was|are|did)\b.{0,12}\b(my|the)\b.{0,15}\b(appointment|booking|call|meeting)\b"
     r"|\b(do i have|did i book|have i booked|did i schedule)\b.{0,30}\b(appointment|booking|call|meeting)\b",
