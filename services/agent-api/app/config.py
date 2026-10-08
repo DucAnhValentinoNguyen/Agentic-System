@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     rerank: str = "off"  # "llm": retrieve rerank_candidates passages, keep only those that help answer (see docs/experiment.md)
     rerank_candidates: int = 10  # the retrieval service returns at most 10
     rerank_keep: int = 5
+    easter_image_url: str = "https://ducanhvalentinonguyen.com/assets/estimate-me.jpg"  # served by the site, not by this service
     public_api_url: str = ""  # base URL of this service, used in cancel links
     cancel_secret: str = ""  # signs cancel links; empty turns the links off
     daily_turns_total: int = 1500  # all visitors together, per day: bounds every cost that grows with turns

@@ -7,7 +7,7 @@ type ServerEvent =
   | { type: "node"; node: string; turn_id: string }
   | { type: "step"; text: string; turn_id: string }
   | { type: "transcript"; text: string; turn_id: string }
-  | { type: "done"; turn_id: string; trace_id?: string; text: string; citations: Citation[]; degraded: boolean; choices?: string[]; links?: { label: string; url: string; note?: string; until?: string }[] }
+  | { type: "done"; turn_id: string; trace_id?: string; text: string; citations: Citation[]; degraded: boolean; choices?: string[]; links?: { label: string; url: string; note?: string; until?: string }[]; image?: { url: string; alt: string; fallback: string } | null }
   | { type: "error"; code: string; text: string; turn_id?: string };
 
 const script = document.currentScript as HTMLScriptElement | null;
@@ -206,11 +206,24 @@ function mount(): void {
     choices: string[] = [],
     links: { label: string; url: string; note?: string; until?: string }[] = [],
     traceId?: string,
+    image?: { url: string; alt: string; fallback: string } | null,
   ): void => {
     if (!pending) return;
     const el = pending.el;
     // Citations are shown as chips, so drop the inline [n] markers.
     pending.body.textContent = text.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "");
+    if (image) {
+      // A picture instead of text. If it cannot be loaded, say the same thing in words rather than show a broken image.
+      const body = pending.body;
+      body.textContent = "";
+      const img = document.createElement("img");
+      img.alt = image.alt;
+      img.loading = "lazy";
+      img.style.cssText = "display:block;max-width:100%;border-radius:8px";
+      img.onerror = () => { img.remove(); body.textContent = image.fallback; };
+      img.src = image.url;
+      body.appendChild(img);
+    }
     if (cites.length) {
       const row = document.createElement("div");
       row.className = "cites";
@@ -301,7 +314,7 @@ function mount(): void {
       pending.steps.appendChild(s);
       logEl.scrollTop = logEl.scrollHeight;
     } else if (ev.type === "done") {
-      finish(ev.text, ev.citations, ev.choices, ev.links, ev.trace_id);
+      finish(ev.text, ev.citations, ev.choices, ev.links, ev.trace_id, ev.image);
     } else if (ev.type === "transcript") {
       if (pending.userEl) pending.userEl.textContent = ev.text;
       pending.text = ev.text;

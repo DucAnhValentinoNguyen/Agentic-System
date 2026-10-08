@@ -379,7 +379,7 @@ async def run_turn(ws: WebSocket, msg: UserMsg, voice: bool = False) -> None:
     done = {
         "type": "done", "turn_id": msg.turn_id, "trace_id": trace_id,
         "text": final.get("answer", ""), "citations": final.get("citations", []),
-        "degraded": bool(final.get("degraded")), "choices": final.get("choices") or [], "links": final.get("links") or [],
+        "degraded": bool(final.get("degraded")), "choices": final.get("choices") or [], "links": final.get("links") or [], "image": final.get("image"),
     }
     app.state.done_turns[(msg.session_id, msg.turn_id)] = done
     await ws.send_json(done)

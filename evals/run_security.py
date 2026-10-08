@@ -71,6 +71,8 @@ async def main() -> int:
         results.append(await run_case(a.url, c))
         r = results[-1]
         print(f"{'PASS' if r['passed'] else 'FAIL'}  {r['id']:<14} {'; '.join(r['fails'])}")
+        if not r["passed"]:  # show what was said, so a failure can be judged without re-running it
+            print(f"      answer: {str(r.get('answer', r.get('text', '')))[:400]!r}")
         await asyncio.sleep(max(0.0, a.sleep * n_turns - (time.time() - t0)))
     by_cat: dict[str, list[bool]] = {}
     for r in results:

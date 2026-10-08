@@ -2,6 +2,7 @@
 
 import datetime as dt
 import operator
+import random
 import re
 import uuid
 from typing import Annotated, Literal, TypedDict
@@ -21,7 +22,7 @@ from ..gateway.router import CallRecord, ProviderError, Router
 
 log = structlog.get_logger()
 
-Intent = Literal["question", "booking", "message", "smalltalk", "off_topic", "injection"]
+Intent = Literal["question", "booking", "message", "smalltalk", "off_topic", "injection", "easter"]
 
 
 class Classification(BaseModel):
@@ -61,6 +62,7 @@ class State(TypedDict, total=False):
     booking: dict
     last_booking: dict
     session_id: str
+    image: dict  # a picture to show with the answer (url, alt)
     summary: str  # what the older turns, outside the window, were about
     summary_upto: int  # how many history messages the summary already covers
     visitor: dict  # name, email, topic given in this chat; survives a cancelled or declined booking
@@ -253,6 +255,8 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
             return {"intent": "booking", "search_query": "", "records": []}
         if q == REPORT_ISSUE:
             return {"intent": "message", "search_query": "", "records": []}
+        if EASTER.fullmatch(q):
+            return {"intent": "easter", "search_query": "", "records": []}
         if (state.get("leave") or {}).get("stage") == "collecting":
             # Free text (the message itself) must not be re-classified while we are collecting it.
             return {"intent": "message", "search_query": "", "records": []}
@@ -367,6 +371,15 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
     async def answer(state: State) -> dict:
         write = get_stream_writer()
         intent = state["intent"]
+        if intent == "easter":
+            if random.random() < 0.5:
+                write({"type": "delta", "text": EASTER_TEXT})
+                return {"answer": EASTER_TEXT, "chunks": [], "links": []}
+            text = "[a picture: Michael Scott, 'Yeah, well, maybe next time... you will estimate me.']"
+            write({"type": "delta", "text": text})
+            return {"answer": text, "chunks": [], "links": [EASTER_CREDIT],
+                    "image": {"url": settings.easter_image_url, "alt": "Yeah, well, maybe next time... you will estimate me.",
+                              "fallback": EASTER_TEXT}}
         if intent != "question":
             write({"type": "delta", "text": CANNED[intent]})
             links = ([{"label": "Open the booking page", "url": settings.booking_page_url}]
@@ -878,6 +891,11 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
     return {"book_collect": book_collect, "book_confirm": book_confirm, "book_create": book_create}
 
 
+# A fixed reply to one fixed sentence (a joke from the site's owner): no model is involved.
+EASTER = re.compile(r"\W*i\s+underestimated\s+you\W*", re.IGNORECASE)
+EASTER_TEXT = "Maybe next time you will estimate me."
+EASTER_CREDIT = {"label": "Image: r/DunderMifflin",
+                 "url": "https://www.reddit.com/r/DunderMifflin/comments/1ec5z4o/after_people_do_a_rewatch_and_say_they/"}
 TODAY_TOMORROW = re.compile(r"\b(tomorrow|today)\b", re.IGNORECASE)
 ASK_EXISTING = re.compile(
     r"\b(when|what time)\b.{0,12}\b(is|was|are|did)\b.{0,12}\b(my|the)\b.{0,15}\b(appointment|booking|call|meeting)\b"
