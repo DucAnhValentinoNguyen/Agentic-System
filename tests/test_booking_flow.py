@@ -566,3 +566,13 @@ async def test_a_normal_booking_never_triggers_the_apology(chat, monkeypatch):
     await turn("30 min")
     out = await turn("Yes, book it")
     assert "terrible" not in out["answer"]
+
+
+async def test_naming_another_time_instead_of_a_length_replaces_the_picked_time(chat):
+    turn, _ = chat
+    await book_one(turn)                                            # 10:00 picked, now asked how long
+    out = await turn("actually tuesday after 4pm", {"requested_date": "2026-10-06"})
+    assert "free 16:00–17:00" in out["answer"] and out["choices"] == []
+    await pick(turn, SLOTS[1])
+    out = await turn("30 min")
+    assert "Wed 07 Oct, 12:30" in out["answer"]

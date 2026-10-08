@@ -724,6 +724,10 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         if not (after or before) and re.search(r"\d", qs):
             after, before = (f.after_time or "", f.before_time or "")      # the model's reading, only when this message has a time
         day_iso = f.requested_date or (f.requested_start or "")[:10] or named_weekday(qs, today) or ""
+        if (b.get("chosen") and b.get("stage") == "length" and not (chip_len or chip_extend)
+                and (f.requested_start or f.requested_date or after or before or BROAD.search(qs))):
+            b.pop("chosen")                          # they named another day or time instead of answering the length
+            b["stage"] = "choosing"
         if not f.requested_start and not (after or before) and b.get("day") and (m := TIME_ONLY.match(qs)):
             # "2pm" or "is 14:30 good?" right after a day was discussed: that day, at that time
             hhmm = _hhmm(m.group(1), m.group(2), m.group(3))
