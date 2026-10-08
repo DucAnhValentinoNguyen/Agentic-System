@@ -639,6 +639,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             f.slot_choice = int(qs)
         elif bk.YES.match(qs) or qs.lower().startswith("no") or chip_len or chip_extend:
             f.slot_choice = None
+        if not DAY_OR_TIME_WORD.search(qs):
+            f.requested_start = f.requested_date = None      # a vague reply ("hm") never inherits a date from earlier turns
         if not (f.requested_start or f.requested_date) and (word := TODAY_TOMORROW.search(qs)):
             # "so no more slot tomorrow?": too short for the model to extract a date from, trivial to resolve here.
             offset = 1 if word.group(1).lower() == "tomorrow" else 0
@@ -964,6 +966,8 @@ ASK_LINK = re.compile(r"\b(booking|calendar|appointment)\s+(link|page)\b|\bhow\s
 NUDGE_AFTER = 5
 NUDGE = " Oh dear, I am terrible at this. Booking directly in his calendar would be better, the button below opens it."
 CORRECTION = re.compile(r"\b(under|instead|change|changed|wrong|my (name|email|e-mail|topic)|use|correct)\b", re.IGNORECASE)
+DAY_OR_TIME_WORD = re.compile(r"\d|\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|\b(today|tomorrow|week|noon|morning|afternoon|evening|day)\b",
+                              re.IGNORECASE)
 EMAIL_IN_TEXT = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 

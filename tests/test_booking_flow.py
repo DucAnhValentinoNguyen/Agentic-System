@@ -128,7 +128,7 @@ DETAILS = {"name": "Ann", "email": "ann@example.com", "topic": "internship"}
 
 async def pick(turn, slot=SLOTS[0]):
     """The visitor types a day and time; the model reads it, the calendar says it is free."""
-    return await turn("how about that time", {"requested_start": slot["start"]})
+    return await turn("how about tuesday at 10", {"requested_start": slot["start"]})
 
 
 async def book_one(turn, length_chip=None, slot=SLOTS[0]):
@@ -226,7 +226,7 @@ async def test_a_visitor_typed_time_that_is_free_is_booked_directly(chat):
     # "Thursday 3pm" never appears in the offered SLOTS list, but the backend checks it for real.
     turn, cal = chat
     await turn("book a call")
-    out = await turn("Book it for me here", {**DETAILS, "requested_start": DIRECT_FREE})
+    out = await turn("Ann ann@example.com internship, thursday at 3pm", {**DETAILS, "requested_start": DIRECT_FREE})
     assert out["choices"] == ["30 min", "60 min"]                           # check_time's own max_slots, not a chip
     out = await turn("30 min")
     assert out["choices"] == ["Yes, book it", "No, cancel"]
@@ -237,7 +237,7 @@ async def test_a_visitor_typed_time_that_is_free_is_booked_directly(chat):
 async def test_a_visitor_typed_time_that_is_taken_offers_nearby_times(chat):
     turn, _ = chat
     await turn("book a call")
-    out = await turn("Book it for me here", {**DETAILS, "requested_start": DIRECT_BUSY})
+    out = await turn("Ann ann@example.com internship, thursday at 9am", {**DETAILS, "requested_start": DIRECT_BUSY})
     assert "isn't available" in out["answer"] and out["choices"] == []
     assert "free 10:00\u201312:00 and 14:00\u201317:00" in out["answer"]     # what is free that day, in words
     out = await pick(turn)                                    # and another time can be typed
@@ -615,3 +615,10 @@ async def test_no_reply_pastes_the_calendar_link_into_the_text(chat, monkeypatch
     assert PAGE_URL not in out["answer"] and out["links"][0]["url"] == PAGE_URL
     out = await turn("how about next week")
     assert PAGE_URL not in out["answer"] and out["links"][0]["url"] == PAGE_URL
+
+
+async def test_a_vague_reply_does_not_inherit_a_date_the_model_carried_over(chat):
+    turn, cal = chat
+    await book_one_details(turn)
+    out = await turn("hm", {"requested_date": "2026-10-06"})
+    assert cal.found is None and "Tell me a day and time" in out["answer"]
