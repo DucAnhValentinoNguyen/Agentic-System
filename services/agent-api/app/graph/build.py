@@ -737,7 +737,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             b["misses"] = b.get("misses", 0) + 1
             b["stage"] = "choosing"
             return say("For a better overview of his week please check his calendar"
-                       + (f": {settings.booking_page_url}" if page else ".")
+                       + (f": {settings.booking_page_url}." if page else ".")
                        + " Or tell me one day and I'll say when he is free." + ask_details, booking=b, links=page)
 
         def free_text(info: dict) -> str:
