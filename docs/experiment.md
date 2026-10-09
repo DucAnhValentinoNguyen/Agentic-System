@@ -164,3 +164,28 @@ real long conversation; retrieval of the right section is the metric, not answer
 ## Not done on purpose: memory across chats
 Nothing is kept per visitor between chats. There is no product reason (a visitor asks a handful of questions), and it would turn a
 30-day log into long-term personal data. If it ever matters it needs an explicit consent and retention rule first.
+
+
+# Experiment 5: could Twin be A/B tested online? (9 Oct 2026, `evals/ab_power.py`, `evals/ab_stats.py`)
+
+**Question.** Experiments 1-4 are offline and paired. Twin also assigns each visitor to an arm (`assign_variant`, a hash of the session id) and
+logs `variant` on every turn. Is there enough real traffic for an online test of a change to the booking flow?
+
+**Design.** Baseline and traffic from the turn log (2-9 Oct 2026): 583 turns, 253 sessions, of which 16 touched booking and 5 completed (31%).
+Most of this traffic was the author's own testing, so genuine booking visitors are assumed to be about 12 a week. Sample sizes use the
+two-proportion z test (alpha 0.05, power 0.8); power and peeking are simulated.
+
+| Lift to detect (points) | Visitors per arm | Weeks of traffic |
+|---|---|---|
+| +30 | 43 | 7 |
+| +20 | 94 | 16 |
+| +10 | 361 | 60 |
+| +5 | 1,398 | 233 |
+
+**Reading.** In four weeks the smallest detectable lift is +39 points; a true +20-point lift with 30 visitors per arm is detected 35% of the time.
+Five completions of 16 starters has a 95% Wilson interval of 14% to 56%, so even the baseline is not pinned down. Looking at an A/A test ten times and
+stopping at the first p < 0.05 gives a false positive 19% of the time instead of 5%.
+
+**Decision.** No online test of the booking flow. Changes are judged with offline paired experiments, where the sample and the pairing are controlled;
+the online machinery (assignment, `variant` logging, sample-ratio check, A/A test, exact paired test, cluster bootstrap, Holm correction) is in
+`evals/ab_stats.py` with tests, ready for a service with real traffic. Not done: an online A/A run (needs `AB_VARIANT=auto`, a Terraform apply).
