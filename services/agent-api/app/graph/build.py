@@ -572,7 +572,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             if extra.get("booking") is b and b.get("misses", 0) >= NUDGE_AFTER and not b.get("nudged") and settings.booking_page_url:
                 # They have gone back and forth without agreeing a time: hand over a link that always works.
                 b["nudged"] = True
-                text += NUDGE
+                text, choices = NUDGE, None
                 extra["links"] = [{"label": "Open the booking page", "url": settings.booking_page_url}]
             write({"type": "delta", "text": text})
             if choices:
@@ -639,7 +639,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             f.slot_choice = int(qs)
         elif bk.YES.match(qs) or qs.lower().startswith("no") or chip_len or chip_extend:
             f.slot_choice = None
-        if not DAY_OR_TIME_WORD.search(qs):
+        qn = number_words(qs)
+        if not DAY_OR_TIME_WORD.search(qn):
             f.requested_start = f.requested_date = None      # a vague reply ("hm") never inherits a date from earlier turns
         if not (f.requested_start or f.requested_date) and (word := TODAY_TOMORROW.search(qs)):
             # "so no more slot tomorrow?": too short for the model to extract a date from, trivial to resolve here.
@@ -724,7 +725,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
         # which time Duc-Anh is free, in words (no chips). Anything wider than a day: hand over his calendar. ----
         page = ([{"label": "Open his calendar", "url": settings.booking_page_url}] if settings.booking_page_url else [])
         today = dt.datetime.now(sl.TZ).date()
-        after, before = time_window(qs)
+        after, before = time_window(qn)
         if not (after or before) and re.search(r"\d", qs):
             after, before = (f.after_time or "", f.before_time or "")      # the model's reading, only when this message has a time
         day_iso = f.requested_date or (f.requested_start or "")[:10] or named_weekday(qs, today) or ""
@@ -732,7 +733,7 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
                 and (f.requested_start or f.requested_date or after or before or BROAD.search(qs))):
             b.pop("chosen")                          # they named another day or time instead of answering the length
             b["stage"] = "choosing"
-        if not f.requested_start and not (after or before) and b.get("day") and (m := TIME_ONLY.match(qs)):
+        if not f.requested_start and not (after or before) and b.get("day") and (m := TIME_ONLY.match(qn)):
             # "2pm" or "is 14:30 good?" right after a day was discussed: that day, at that time
             hhmm = _hhmm(m.group(1), m.group(2), m.group(3))
             if hhmm:
@@ -957,6 +958,16 @@ TIME_ONLY = re.compile(r"^\s*(?:is |how about |what about |at |around |maybe )*(
                        r"(?:\s+(?:is |would be )?(?:good|ok|okay|fine|possible|free))?\s*\??\s*$", re.IGNORECASE)
 
 
+NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                "eleven": 11, "twelve": 12}
+
+
+def number_words(text: str) -> str:
+    """"at five" -> "at 5", so the time readers below need only digits. Only whole words, so "someone" is untouched."""
+    return re.sub(r"\b(" + "|".join(NUMBER_WORDS) + r")\b", lambda m: str(NUMBER_WORDS[m.group(1).lower()]), text,
+                  flags=re.IGNORECASE)
+
+
 def _join(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
@@ -964,7 +975,8 @@ def _join(items: list[str]) -> str:
 ASK_LINK = re.compile(r"\b(booking|calendar|appointment)\s+(link|page)\b|\bhow\s+(do|can)\s+i\s+(schedule|book)\b|\bgive me (the |a )?link\b",
                       re.IGNORECASE)
 NUDGE_AFTER = 5
-NUDGE = " Oh dear, I am terrible at this. Booking directly in his calendar would be better, the button below opens it."
+NUDGE = ("Oh dear, I am terrible at this. At this point, booking directly in his calendar would be better, "
+         "the button below opens it. Sorry for not being helpful.")
 CORRECTION = re.compile(r"\b(under|instead|change|changed|wrong|my (name|email|e-mail|topic)|use|correct)\b", re.IGNORECASE)
 DAY_OR_TIME_WORD = re.compile(r"\d|\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|\b(today|tomorrow|week|noon|morning|afternoon|evening|day)\b",
                               re.IGNORECASE)

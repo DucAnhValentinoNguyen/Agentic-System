@@ -622,3 +622,25 @@ async def test_a_vague_reply_does_not_inherit_a_date_the_model_carried_over(chat
     await book_one_details(turn)
     out = await turn("hm", {"requested_date": "2026-10-06"})
     assert cal.found is None and "Tell me a day and time" in out["answer"]
+
+
+async def test_number_words_are_times_too(chat):
+    turn, _ = chat
+    await book_one_details(turn)
+    await turn("what is free on Tuesday?", {"requested_date": "2026-10-06"})
+    out = await turn("how about at ten", {"requested_start": START})
+    assert out["choices"] == ["30 min", "60 min", "90 min"]
+    from app.graph.build import number_words, time_window
+    assert number_words("how about at five") == "how about at 5" and number_words("someone") == "someone"
+    assert time_window(number_words("anything after four")) == ("16:00", "")
+
+
+async def test_the_apology_replaces_the_generic_reply(chat, monkeypatch):
+    monkeypatch.setattr(settings, "booking_page_url", PAGE_URL)
+    turn, _ = chat
+    await book_one_details(turn)
+    for i in range(4):
+        await turn(f"hmm not sure {i}")
+    out = await turn("not that either")
+    assert out["answer"].startswith("Oh dear, I am terrible at this. At this point") and "Tell me a day" not in out["answer"]
+    assert out["answer"].endswith("Sorry for not being helpful.") and out["choices"] == []
