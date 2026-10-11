@@ -646,6 +646,15 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             # "so no more slot tomorrow?": too short for the model to extract a date from, trivial to resolve here.
             offset = 1 if word.group(1).lower() == "tomorrow" else 0
             f.requested_date = (dt.datetime.now(sl.TZ).date() + dt.timedelta(days=offset)).isoformat()
+        # The model is unreliable at calendar arithmetic ("Monday" came back as Tuesday). A weekday the visitor names is
+        # resolved here; the model's date is only kept when it falls on that weekday (e.g. "Monday next week").
+        if named := named_weekday(qs, dt.datetime.now(sl.TZ).date()):
+            want_wd = dt.date.fromisoformat(named).weekday()
+            if f.requested_date and dt.date.fromisoformat(f.requested_date[:10]).weekday() != want_wd:
+                f.requested_date = named
+            if f.requested_start and dt.datetime.fromisoformat(f.requested_start).weekday() != want_wd:
+                old = dt.datetime.fromisoformat(f.requested_start)
+                f.requested_start = dt.datetime.combine(dt.date.fromisoformat(named), old.timetz()).isoformat()
         if f.cancel:
             if b.get("stage") in ("collecting", "choosing", "length"):
                 # Nothing was created yet, so there is nothing to undo. Never imply a booked call was cancelled.
@@ -1010,7 +1019,7 @@ def time_window(text: str) -> tuple[str, str]:
 
 def named_weekday(text: str, today: dt.date) -> str | None:
     """The next date (YYYY-MM-DD) of a weekday named in the text, e.g. "tuesday after 4pm"; None if none is named."""
-    low = text.lower()
+    low = re.sub(r"\bnot\s+(?:on\s+)?\w+\b", " ", text.lower())      # "monday not tuesday" names Monday
     for i, name in enumerate(WEEKDAYS):
         if re.search(rf"\b{name}\b|\b{name[:3]}\b", low):
             return (today + dt.timedelta(days=(i - today.weekday()) % 7 or 7)).isoformat()

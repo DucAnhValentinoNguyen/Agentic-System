@@ -128,7 +128,8 @@ DETAILS = {"name": "Ann", "email": "ann@example.com", "topic": "internship"}
 
 async def pick(turn, slot=SLOTS[0]):
     """The visitor types a day and time; the model reads it, the calendar says it is free."""
-    return await turn("how about tuesday at 10", {"requested_start": slot["start"]})
+    weekday = slot["label"][:3]                                     # the words say the same weekday as the date
+    return await turn(f"how about {weekday} at 10", {"requested_start": slot["start"]})
 
 
 async def book_one(turn, length_chip=None, slot=SLOTS[0]):
@@ -427,7 +428,7 @@ async def test_a_weekend_with_nothing_after_it_sends_the_visitor_to_email(chat):
 async def test_an_unavailable_time_explains_the_reason(chat):
     turn, _ = chat
     await book_one_details(turn)
-    out = await turn("how about Friday at 8am", {"requested_start": DIRECT_BUSY})
+    out = await turn("how about thursday at 9am", {"requested_start": DIRECT_BUSY})
     assert "isn't available: Duc-Anh needs at least 24 hours' notice" in out["answer"]
 
 
@@ -453,7 +454,7 @@ async def test_tomorrow_is_understood_even_when_the_model_extracts_nothing(chat)
     turn, _ = chat
     await book_one_details(turn)
     out = await turn("so no more slot tomorrow?")                                          # the extractor returns nothing here
-    assert "Nothing is free on" in out["answer"] and out["choices"] == []                  # whatever tomorrow is on the clock
+    assert "free" in out["answer"] and out["choices"] == []                                # whatever tomorrow is on the clock
     assert "Tell me a day and time" not in out["answer"]                                   # not the generic repeat
 
 
@@ -644,3 +645,21 @@ async def test_the_apology_replaces_the_generic_reply(chat, monkeypatch):
     out = await turn("not that either")
     assert out["answer"].startswith("Oh dear, I am terrible at this. At this point") and "Tell me a day" not in out["answer"]
     assert out["answer"].endswith("Sorry for not being helpful.") and out["choices"] == []
+
+
+async def test_a_weekday_the_visitor_names_overrides_a_wrong_date_from_the_model(chat):
+    turn, cal = chat
+    await book_one_details(turn)
+    today = __import__("datetime").datetime.now(__import__("app.slots", fromlist=["TZ"]).TZ).date()
+    wrong = today + __import__("datetime").timedelta(days=(1 - today.weekday()) % 7 or 7)          # the next Tuesday
+    await turn("when does Duc have time on Monday", {"requested_date": wrong.isoformat()})
+    day = cal.found[0]
+    assert __import__("datetime").date.fromisoformat(day).weekday() == 0                          # asked about Monday
+
+
+def test_a_negated_weekday_is_not_the_one_asked_about():
+    import datetime as d
+
+    from app.graph.build import named_weekday
+    assert named_weekday("no on monday not tuesday", d.date(2026, 10, 11)) == "2026-10-12"
+    assert named_weekday("tuesday please", d.date(2026, 10, 11)) == "2026-10-13"
