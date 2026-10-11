@@ -655,6 +655,8 @@ def make_booking_nodes(router: Router, calendar: bk.Calendar):
             if f.requested_start and dt.datetime.fromisoformat(f.requested_start).weekday() != want_wd:
                 old = dt.datetime.fromisoformat(f.requested_start)
                 f.requested_start = dt.datetime.combine(dt.date.fromisoformat(named), old.timetz()).isoformat()
+            if not (f.requested_date or f.requested_start):
+                f.requested_date = named             # the model read no date, but the visitor named a day
         if f.cancel:
             if b.get("stage") in ("collecting", "choosing", "length"):
                 # Nothing was created yet, so there is nothing to undo. Never imply a booked call was cancelled.

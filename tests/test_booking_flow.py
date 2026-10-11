@@ -526,7 +526,7 @@ async def test_the_models_stale_window_is_ignored_when_the_message_has_no_time(c
     turn, cal = chat
     await book_one_details(turn)
     cal.found = None
-    await turn("how about the one on wednesday", {"after_time": "16:00"})
+    await turn("that one please", {"after_time": "16:00"})
     assert cal.found is None
 
 
@@ -663,3 +663,10 @@ def test_a_negated_weekday_is_not_the_one_asked_about():
     from app.graph.build import named_weekday
     assert named_weekday("no on monday not tuesday", d.date(2026, 10, 11)) == "2026-10-12"
     assert named_weekday("tuesday please", d.date(2026, 10, 11)) == "2026-10-13"
+
+
+async def test_a_named_weekday_is_enough_when_the_model_extracts_no_date(chat):
+    turn, cal = chat
+    await book_one_details(turn)
+    out = await turn("no on monday not tuesday")
+    assert cal.found is not None and cal.found[0] != "" and "Tell me a day and time" not in out["answer"]
