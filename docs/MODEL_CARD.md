@@ -27,7 +27,7 @@ request only and never stored.
 ## Evaluation (details in `docs/experiment.md`)
 - Held-out factual questions, plain RAG vs RAG plus claim verification: no detectable benefit from verification, so it is off.
 - Research mode (plan, several searches, reflect): recall gain +0.125 in one run and +0.049 in another; used for complex questions only.
-- 35-case adversarial suite (injection, prompt extraction, fabrication traps, off-topic, on-topic-without-a-name): run as a gate on every deploy.
+- 37-case adversarial suite (injection, prompt extraction, fabrication traps, off-topic, on-topic-without-a-name, date facts): run as a gate on every deploy.
 - Judge versus 47 human labels: 94% raw agreement, Cohen's kappa about 0, both judge flags false alarms; recall not yet measurable.
 - Voice: 20 synthetic spoken questions, word error rate 11.5% after the final prompt (synthetic speech, an upper bound).
 
