@@ -51,7 +51,10 @@ resource "google_cloud_run_v2_service" "guard" {
       image   = local.guard_image
       command = ["sh", "-c"]
       args    = ["exec .venv/bin/uvicorn app.billing_guard:app --app-dir services/agent-api --host 0.0.0.0 --port $PORT"]
-      resources { limits = { cpu = "1", memory = "512Mi" } }
+      resources {
+        limits   = { cpu = "1", memory = "512Mi" }
+        cpu_idle = true # bill CPU only while a request is being served
+      }
       env {
         name  = "GCP_PROJECT"
         value = var.project

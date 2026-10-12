@@ -113,6 +113,7 @@ resource "google_cloud_run_v2_service" "agent" {
       resources {
         limits            = { cpu = "1", memory = "512Mi" }
         startup_cpu_boost = true
+        cpu_idle          = true # bill CPU only while a request (or an open chat connection) is being served
       }
       env {
         name  = "GCP_PROJECT"
@@ -237,6 +238,7 @@ resource "google_cloud_run_v2_service" "retrieval" {
       resources {
         limits            = { cpu = "1", memory = "512Mi" }
         startup_cpu_boost = true
+        cpu_idle          = true # bill CPU only while a request (or an open chat connection) is being served
       }
       startup_probe {
         tcp_socket { port = 8080 }
