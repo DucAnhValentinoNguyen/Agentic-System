@@ -114,3 +114,22 @@ async def test_retrieval_merges_the_rewritten_query_with_the_visitors_own_words(
         assert seen == ["rewritten query"]
     finally:
         settings.retrieve_raw_too = True
+
+
+async def test_an_answer_that_stops_mid_sentence_is_generated_again_once():
+    from app.graph.build import ends_mid_sentence
+    assert ends_mid_sentence("The Velocity Racing pilot proposes a Recovery") and not ends_mid_sentence("It is capped at 100k [1].")
+    assert not ends_mid_sentence("A list: ")                       # trailing space is ignored
+    replies = iter(["The pilot proposes a Recovery", "The pilot proposes an RTO of 15 min [1]."])
+
+    class Flaky(Router):
+        async def stream(self, tier, messages, records, **kw):
+            yield {"type": "delta", "text": next(replies)}
+
+    router = Flaky("unused")
+    graph = build_graph(router, Retriever(), Cal(), section_links=LINKS)
+    out = {}
+    async for ev in graph.astream({"question": "q", "records": [], "variant": "A"}, {"configurable": {"thread_id": uuid.uuid4().hex}}, stream_mode="updates"):
+        for upd in ev.values():
+            out.update(upd if isinstance(upd, dict) else {})
+    assert out["answer"] == "The pilot proposes an RTO of 15 min [1]."

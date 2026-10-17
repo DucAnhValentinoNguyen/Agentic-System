@@ -192,6 +192,12 @@ you don't have that information on the site, then add one plain sentence: You ca
 SENTENCE_END = re.compile(r"[.!?](?:\s*\[\d+(?:\s*,\s*\d+)*\])*(?=\s|$)")
 
 
+def ends_mid_sentence(text: str) -> bool:
+    """True if a finished answer stops without closing punctuation or a citation marker: it was cut off."""
+    t = text.rstrip()
+    return bool(t) and t[-1] not in ".!?)]\"'”…:"
+
+
 def trim_to_sentence(text: str) -> str:
     """Drop a trailing partial sentence (keeping any citation markers that close the last one)."""
     ends = [m.end() for m in SENTENCE_END.finditer(text)]
@@ -434,19 +440,29 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
         recs: list[CallRecord] = []
         parts: list[str] = []
         try:
-            async for ev in router.stream("strong", msgs, recs, max_tokens=1500, temperature=0.2):
-                if ev["type"] == "truncated":
-                    # Cut off by the token limit: keep only whole sentences.
-                    trimmed = trim_to_sentence("".join(parts))
-                    parts[:] = [trimmed]
-                    write({"type": "retract"})
-                    write({"type": "delta", "text": trimmed})
-                    continue
-                if ev["type"] == "retract":
-                    parts.clear()
-                else:
-                    parts.append(ev["text"])
-                write(ev)
+            for attempt in range(2):
+                truncated = False
+                async for ev in router.stream("strong", msgs, recs, max_tokens=1500, temperature=0.2):
+                    if ev["type"] == "truncated":
+                        # Cut off by the token limit: keep only whole sentences.
+                        truncated = True
+                        trimmed = trim_to_sentence("".join(parts))
+                        parts[:] = [trimmed]
+                        write({"type": "retract"})
+                        write({"type": "delta", "text": trimmed})
+                        continue
+                    if ev["type"] == "retract":
+                        parts.clear()
+                    else:
+                        parts.append(ev["text"])
+                    write(ev)
+                if truncated or not ends_mid_sentence("".join(parts)) or attempt == 1:
+                    break
+                # The stream ended without an error and without a length signal, yet the sentence is unfinished (seen with
+                # Vertex: an answer that stopped after "proposes a Recovery"). Ask once more instead of showing half a sentence.
+                log.warning("answer_incomplete", chars=len("".join(parts)))
+                parts.clear()
+                write({"type": "retract"})
             return {"answer": "".join(parts), "records": recs}
         except ProviderError as e:
             # Degraded mode: no model, but the visitor still gets the relevant sections.
