@@ -233,13 +233,19 @@ MARK = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def site_topics(titles: list[str], limit: int = 40) -> list[str]:
-    """Short names of what the site covers (project names, employers, courses), from the section titles."""
+def site_topics(titles: list[str], limit: int = 70) -> list[str]:
+    """Short names of what the site covers (project names, employers, courses, report sections), from the section titles.
+
+    Titles of pages read through links look like "Page — Heading": both parts are topics, because a visitor may ask about a heading
+    ("the HyperKvasir 20-way task") without naming the person or the project, and must not be told it is off topic."""
     seen: dict[str, None] = {}
     for t in titles:
-        head = re.split(r"\s[—–:·]\s", t)[0].strip()
-        if 2 <= len(head) <= 60 and head.lower() not in {"about", "contact", "skills", "education"}:
-            seen[head] = None
+        for raw in re.split(r"\s[—–·]\s|:\s", t)[:3]:
+            if re.fullmatch(r"(\d+\s+\w+|page \d+)", raw.strip()):
+                continue                                           # "2 courses", "page 4"
+            part = re.sub(r"^[\d.\s·]+(?=[A-Za-z])", "", raw).strip()
+            if 2 <= len(part) <= 60 and part.lower() not in {"about", "contact", "skills", "education", "further", "results"}:
+                seen[part] = None
     return list(seen)[:limit]
 
 

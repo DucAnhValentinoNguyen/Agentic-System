@@ -289,3 +289,9 @@ missed in both modes ("how much is the pilot capped at?" never retrieves its sec
 problem is reduced, not solved. One more search per follow-up costs a few milliseconds in-process (an extra gRPC call to the retrieval service).
 
 **Decision.** On by default. Not yet attempted: a reranker pass over the merged candidates (`RERANK=llm` exists, off by default since Experiment 3).
+
+**Side finding (same day).** The deploy gate stopped the first deploy of Experiment 8: "Why were three classes dropped from the HyperKvasir 20-way
+task?" was answered "I can only help with questions about Duc-Anh Nguyen…". The question names neither the person nor the project, and the topic list
+the classifier receives used only the first part of each section title ("Full-Corpus Results"), so "HyperKvasir" was unknown to it. Measured on the 13 deep
+questions with 3 repeats each: 2 of 39 classifications were off-topic before; after adding the later parts of the titles (70 topics instead of 26) 0 of 39.
+A small sample, but the cause is clear and the gate would have caught a repeat.

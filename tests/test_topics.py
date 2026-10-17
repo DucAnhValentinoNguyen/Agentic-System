@@ -8,8 +8,14 @@ TITLES = ["gnhf — merged fix to a 3.8k-star autonomous coding agent", "Contact
           "Teaching Assistant — 2 courses: Logic & Discrete Structures", "About"]
 
 
-def test_site_topics_keeps_project_names_and_drops_generic_headings():
-    assert site_topics(TITLES) == ["gnhf", "SurgGround", "Teaching Assistant"]
+def test_site_topics_keeps_project_names_and_heading_parts_and_drops_generic_headings():
+    assert site_topics(TITLES) == ["gnhf", "merged fix to a 3.8k-star autonomous coding agent", "SurgGround", "Teaching Assistant",
+                                   "Logic & Discrete Structures"]
+
+
+def test_headings_of_linked_pages_are_topics_too_without_numbering():
+    assert site_topics(["Full-Corpus Results — 3 · HyperKvasir: how unbalanced and noisy it is", "Velocity Racing on AWS (PDF) — page 4"]) == [
+        "Full-Corpus Results", "HyperKvasir", "Velocity Racing on AWS (PDF)"]
 
 
 class Spy:
@@ -32,4 +38,4 @@ async def test_the_classifier_prompt_lists_the_site_topics():
     cfg = {"configurable": {"thread_id": uuid.uuid4().hex}}
     async for _ in graph.astream({"question": "How badly did the gnhf token cap undercount spend?", "records": []}, cfg):
         pass
-    assert "gnhf; SurgGround; Teaching Assistant" in spy.systems[0] and "never off_topic" in spy.systems[0]
+    assert "gnhf; merged fix to a 3.8k-star autonomous coding agent; SurgGround; Teaching Assistant" in spy.systems[0] and "never off_topic" in spy.systems[0]
