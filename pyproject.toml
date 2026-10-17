@@ -26,6 +26,7 @@ dependencies = [
   "langchain>=1.4.3",
   "grpcio-health-checking>=1.84.0",
   "google-cloud-firestore>=2.34.0",
+  "snowballstemmer>=3.1.1",
 ]
 
 [dependency-groups]

@@ -3,12 +3,14 @@
 If the embedding call fails, BM25 alone still answers (graceful degradation).
 """
 
+import functools
 import json
 import math
 import re
 import time
 
 import httpx
+import snowballstemmer
 import structlog
 from rank_bm25 import BM25Okapi
 
@@ -16,16 +18,38 @@ from .config import settings
 
 log = structlog.get_logger()
 TOKEN = re.compile(r"[a-z0-9]+")
+# Words that carry no topic in a question about a person's work. BM25 already down-weights them by idf, but in a 28-chunk corpus
+# "the" and "and" still add noise to every score, so they are dropped. Deliberately short: no content words, no numbers.
+STOP = frozenset(
+    ["a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "at", "for", "from", "by", "with", "as", "is", "are", "was", "were", "be", "been", "being", "it", "its", "this", "that", "these", "those", "he", "him", "his", "she", "her", "they", "them", "their", "what", "which", "who", "whom", "how", "why", "when", "where", "do", "does", "did", "done", "can", "could", "would", "should", "will", "has", "have", "had", "having", "about", "into", "than", "then", "so", "if", "also", "there", "here", "you", "your", "me", "my", "i", "we", "our", "us"])
+_STEM = snowballstemmer.stemmer("english")
 
 
-def tok(s: str) -> list[str]:
-    return TOKEN.findall(s.lower())
+@functools.lru_cache(maxsize=20000)
+def stem(word: str) -> str:
+    out = _STEM.stemWord(word)
+    # Snowball keeps "llms" and "vlms": it only strips an "s" that follows a vowel. Plural acronyms are common on this site.
+    if out.endswith("s") and len(out) > 3 and not out.endswith("ss") and not any(v in out[:-1] for v in "aeiou"):
+        out = out[:-1]
+    return out
+
+
+def tok(s: str, analyzer: str = "stem+stop") -> list[str]:
+    """Lowercase alphanumeric tokens. analyzer: "plain" (the original), "stop" (drop stop words), "stem" (Snowball English stems, so
+    "models" matches "model" and "LLMs" matches "LLM"), or "stem+stop"."""
+    words = TOKEN.findall(s.lower())
+    if "stop" in analyzer:
+        words = [w for w in words if w not in STOP] or words      # a query made only of stop words keeps its words
+    if "stem" in analyzer:
+        words = [stem(w) for w in words]
+    return words
 
 
 class Index:
-    def __init__(self, chunks: list[dict]):
+    def __init__(self, chunks: list[dict], analyzer: str | None = None):
         self.chunks = chunks
-        self.bm25 = BM25Okapi([tok(c["title"] + " " + c["text"]) for c in chunks])
+        self.analyzer = analyzer or settings.lexical_analyzer
+        self.bm25 = BM25Okapi([tok(c["title"] + " " + c["text"], self.analyzer) for c in chunks])
         self.vectors: list[list[float]] | None = None
         self._warm_at = 0.0
 
@@ -67,7 +91,7 @@ class Index:
 
     async def search(self, query: str, token: str | None, k: int = 5) -> list[dict]:
         n = len(self.chunks)
-        scores = self.bm25.get_scores(tok(query))
+        scores = self.bm25.get_scores(tok(query, self.analyzer))
         ranks = [sorted(range(n), key=lambda i: -scores[i])]
         # Startup embedding can fail (e.g. IAM not propagated yet): retry at most once a minute.
         if self.vectors is None and token and time.monotonic() - self._warm_at > 60:

@@ -1,0 +1,16 @@
+{"id": "ph-models", "question": "Which models did he fine-tune?", "gold_contains": ["PaliGemma2-3B", "SigLIP2"]}
+{"id": "ph-publications", "question": "Does he have any publications?", "gold_contains": ["CVPR 2027", "in preparation for ISPRS GeoSpatial Week 2027"]}
+{"id": "ph-students", "question": "How many students did he teach?", "gold_contains": ["100+"]}
+{"id": "ph-study", "question": "Where is he studying and what degrees does he hold?", "gold_contains": ["B.Sc. Statistics"]}
+{"id": "ph-sports", "question": "What sports does he play?", "gold_contains": ["Basketball"]}
+{"id": "ph-hackathons", "question": "Which hackathons has he participated in?", "gold_contains": ["European Hackathon League", "EMEA Early Career Talent Hackathon"]}
+{"id": "ph-agents", "question": "What agents has he built for tool use?", "gold_contains": ["tool-calling", "bounded multi-agent"]}
+{"id": "ph-languages", "question": "Which languages does he speak?", "gold_contains": ["Vietnamese (native)"]}
+{"id": "ph-forecast", "question": "How are the store sales forecasted?", "gold_contains": ["WAPE"]}
+{"id": "ph-embeddings", "question": "What embeddings and vector searches does he use?", "gold_contains": ["text-embedding-005", "vector search"]}
+{"id": "ph-gpu", "question": "Does he administer the GPU clusters?", "gold_contains": ["Administer the Department of Statistics GPU cluster"]}
+{"id": "ph-donor", "question": "Is he donating blood?", "gold_contains": ["Blood donor"]}
+{"id": "ph-lidar", "question": "How are the point clouds segmented?", "gold_contains": ["autoencoder"]}
+{"id": "ph-quantised", "question": "Has he quantized or pruned any models?", "gold_contains": ["int4"]}
+{"id": "ph-runs", "question": "How fast does he run marathons?", "gold_contains": ["marathon personal best"]}
+{"id": "ph-fixes", "question": "Which bugs did he fix in open-source projects?", "gold_contains": ["183x", "EmbeddingCollapseMetric"]}
