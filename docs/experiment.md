@@ -189,3 +189,33 @@ stopping at the first p < 0.05 gives a false positive 19% of the time instead of
 **Decision.** No online test of the booking flow. Changes are judged with offline paired experiments, where the sample and the pairing are controlled;
 the online machinery (assignment, `variant` logging, sample-ratio check, A/A test, exact paired test, cluster bootstrap, Holm correction) is in
 `evals/ab_stats.py` with tests, ready for a service with real traffic. Not done: an online A/A run (needs `AB_VARIANT=auto`, a Terraform apply).
+
+
+# Experiment 6: does stemming and a stop-word list improve the lexical half of retrieval? (17 Oct 2026, `evals/lexical_study.py`)
+
+**Question.** BM25 matched exact tokens only: "marathons" did not match "marathon", "LLMs" did not match "LLM", and filler words ("what", "is", "he")
+added score to the wrong sections. Would Snowball stemming and a 70-word stop list help, and does it still help once the embedding half of the
+hybrid search is added?
+
+**Design.** Retrieval only (no answer generation, no judge), k = 5, paired comparison of four analyzers on the same questions: plain (the old
+tokeniser), stop words only, stemming only, both. Two question sets. *Primary*: 35 answerable questions with known gold sections, the 12 multi-hop
+cases plus the single-fact cases of the 40-case fact set whose gold facts can be located in the corpus (the 5 unanswerable cases have no gold
+section and are not retrievable by definition); written before this change. *Phrasing*: 16 natural questions with inflections and filler words
+(for example "How fast does he run marathons?"), written after the change was proposed, so it can favour the change. Metrics: recall of the gold
+sections in the top 5 and the reciprocal rank of the first gold section; paired bootstrap interval over questions.
+
+| Hybrid search (BM25 + Vertex embeddings) | Primary recall@5 (n = 35) | Phrasing recall@5 (n = 16) |
+|---|---|---|
+| plain (before) | 0.837 | 0.740 |
+| stop words only | 0.857 | 0.792 |
+| stemming only | 0.852 | 0.938 |
+| **stemming + stop words** | **0.877 (+0.039, 95% interval +0.001 to +0.086; 4 questions better, 0 worse)** | **0.958 (+0.219, +0.062 to +0.438; 4 better, 0 worse)** |
+
+**Reading.** On the lexical half alone (no embeddings) the picture is mixed: mean reciprocal rank on the primary set rises from 0.764 to 0.871, but one
+question ("Which cloud platforms and services does he list?") drops from 1.00 to 0.00 and another from 0.75 to 0.50, so stemming and stop words are
+not a free win in isolation. With the embedding half in place the changes are never negative on either set. The primary-set gain is small and its
+interval just excludes zero; the phrasing-set gain is large but the set is small and was written with the change in mind. Snowball does not
+stem "LLMs" to "LLM" (no vowel before the "s"), so a one-line rule for vowel-less acronym plurals was added.
+
+**Decision.** Stemming and stop words are the default (`LEXICAL_ANALYZER=stem+stop`; `plain` restores the old behaviour). Results in
+`evals/results/lexical_bm25.json` and `lexical_hybrid.json`.

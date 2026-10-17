@@ -77,7 +77,8 @@ async def lifespan(app: FastAPI):
     app.state.durability = "exit" if saver else "async"  # one Firestore write per turn instead of one per step
     app.state.calendar = Calendar(app.state.store)
     app.state.graph = build_graph(router, retriever, app.state.calendar,
-                                  topics=site_topics([c["title"] for c in index.chunks]), checkpointer=saver)
+                                  topics=site_topics([c["title"] for c in index.chunks]), checkpointer=saver,
+                                  section_links={c["anchor"]: c.get("links", []) for c in index.chunks})
     app.state.hits = defaultdict(deque)   # ip -> recent turn timestamps
     app.state.turns = defaultdict(int)    # session -> turn count
     app.state.done_turns = {}             # (session, turn_id) -> final event (idempotent replay)

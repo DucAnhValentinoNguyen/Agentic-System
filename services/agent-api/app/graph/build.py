@@ -95,6 +95,8 @@ more", "why?", "and the second one?", "how is it trained?"); false when it is se
 search_query: a standalone search query for the question, resolving references to earlier turns.
 Empty for other intents."""
 
+SUMMARY_ONLY = "The site only summarises this."
+
 ANSWER = """You are the assistant on Duc-Anh Nguyen's portfolio website. You speak about him in
 the third person; you are not him.
 
@@ -116,6 +118,12 @@ Rules:
   or provides a product (a competition, a cloud platform) is not an employer: if the question asks what he did
   at or for that organisation and no source says he worked or studied there, your whole answer is that you
   don't have that information on the site, with the email sentence, and nothing else.
+- The sources are short summaries. Under a source you may see "Linked from this section (not read)": longer material such
+  as a report, a demo or a repository. You have NOT read it. If the visitor asks for more detail than the sources contain
+  (what a report says, how a demo works, the results behind a link), do not paraphrase the link label as if it were
+  content and do not invent details. Start the answer with exactly "The site only summarises this.", then say in one or two
+  sentences what the sources do state, and name the linked item that would hold the details. Do not use that opening when
+  the sources already answer the question.
 - Be brief: {length}, plain text, no markdown headings. Answer in the visitor's language.
 
 Sources:
@@ -235,7 +243,13 @@ def site_topics(titles: list[str], limit: int = 40) -> list[str]:
 
 
 def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[str] | None = None,
-                checkpointer=None):
+                checkpointer=None, section_links: dict[str, list[dict]] | None = None):
+    section_links = section_links or {}
+
+    def linked_note(anchor: str) -> str:
+        labels = [x["label"] for x in section_links.get(anchor, [])][:6]
+        return "\nLinked from this section (not read): " + "; ".join(labels) if labels else ""
+
     topic_note = ("\nThe site covers these projects and topics. A question about any of them is intent "
                   "\"question\" even if it never mentions Duc-Anh by name, and is never off_topic: "
                   + "; ".join(topics) + ".") if topics else ""
@@ -386,7 +400,7 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
                      if intent == "booking" and settings.booking_page_url else [])
             return {"answer": CANNED[intent], "chunks": [], "links": links}
         chunks = state["chunks"]
-        sources = "\n\n".join(f"[{i + 1}] {c['title']}\n{c['text']}" for i, c in enumerate(chunks))
+        sources = "\n\n".join(f"[{i + 1}] {c['title']}\n{c['text']}{linked_note(c['anchor'])}" for i, c in enumerate(chunks))
         msgs = [{"role": "system",
                  "content": with_summary(ANSWER.format(
                      email=settings.contact_email, sources=sources,
@@ -462,9 +476,21 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
                     seen.append(n)
         cites = [{"n": n, "anchor": chunks[n - 1]["anchor"], "title": chunks[n - 1]["title"],
                   "url": chunks[n - 1]["url"]} for n in seen]
-        return {"citations": cites,
-                "history": [{"role": "user", "content": state["question"]},
-                            {"role": "assistant", "content": state["answer"]}]}
+        out: dict = {"citations": cites,
+                     "history": [{"role": "user", "content": state["question"]},
+                                 {"role": "assistant", "content": state["answer"]}]}
+        if state["answer"].lstrip().startswith(SUMMARY_ONLY):
+            # The visitor asked for more than the summary holds: hand over the links of the sections the answer used.
+            anchors = [c["anchor"] for c in cites] or [c["anchor"] for c in chunks[:1]]
+            links, seen = [], set()
+            for a in anchors:
+                for x in section_links.get(a, []):
+                    if x["url"] not in seen and len(links) < 4:
+                        seen.add(x["url"])
+                        links.append({"label": x["label"], "url": x["url"]})
+            if links:
+                out["links"] = links
+        return out
 
     async def summarize(state: State) -> dict:
         """Fold turns that fell out of the history window into a short summary (fails open: no summary, no harm)."""

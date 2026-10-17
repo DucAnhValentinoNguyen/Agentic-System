@@ -6,6 +6,7 @@ Each chunk keeps a deep link (site_url#anchor) so answers can cite and scroll to
 import argparse
 import json
 import sys
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -13,6 +14,25 @@ from bs4 import BeautifulSoup
 SITE = "https://ducanhvalentinonguyen.com/"
 SKIP_IDS = {"toggle-all"}
 MAX_CHARS = 2000
+
+
+def section_links(el, base_url: str) -> list[dict]:
+    """Where a section points to: [{"label", "url"}] for its outgoing links (not in-page anchors, mail or script links).
+
+    The assistant does not read these pages; it only knows that they exist and what they are called.
+    """
+    seen, out = set(), []
+    for a in el.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
+            continue
+        url = urljoin(base_url, href)
+        label = " ".join(a.get_text(" ", strip=True).replace("→", " ").split())
+        if url in seen or not label:
+            continue
+        seen.add(url)
+        out.append({"label": label, "url": url})
+    return out
 
 
 def build(html: str, base_url: str) -> list[dict]:
@@ -33,6 +53,7 @@ def build(html: str, base_url: str) -> list[dict]:
             continue
         heading = el.find(["h1", "h2", "h3", "h4"])
         title = heading.get_text(" ", strip=True) if heading else anchor.replace("-", " ")
+        links = section_links(el, base_url)
         for i in range(0, len(text), MAX_CHARS):
             chunks.append({
                 "anchor": anchor,
@@ -40,6 +61,7 @@ def build(html: str, base_url: str) -> list[dict]:
                 "url": f"{base_url}#{anchor}",
                 "part": i // MAX_CHARS,
                 "text": text[i:i + MAX_CHARS],
+                "links": links,
             })
     return chunks
 
