@@ -258,7 +258,7 @@ one topic outranks a short curated summary; the discount lowers it, it does not 
 
 **Risks checked.** Linked pages are untrusted text like any source: a fourth poisoned-document case (an injection hidden in a PDF page) passes
 with the rest of the poison suite (4/4, local server). Facts can conflict between pages; for the five pages read here no conflict was found, but nothing
-checks for it automatically. The deploy gate gained six questions whose answers exist only in linked pages (48 cases run before traffic moves).
+checks for it automatically. The deploy gate gained six questions whose answers exist only in linked pages (48 cases run before traffic moves). The first deploy of this change was stopped by the gate itself: an Option 1 case that expected "the site only summarises this" about the report failed because Twin now answers from the report; that case, whose premise had expired, was moved to links Twin still does not read (a LinkedIn post, a live demo).
 
 **Decision.** Deep corpus on (`python ingest/build_corpus.py`; `--no-deep` rebuilds the old one). The retrieval service now embeds 101 sections at start-up
 (13 requests), which lengthens a cold start by a few seconds; it does not run per question.
