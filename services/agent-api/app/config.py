@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     vertex_location: str = "europe-west4"  # EU-pinned; both models verified there
     embed_location: str = "europe-west4"
     embed_model: str = "text-embedding-005"
+    retrieve_raw_too: bool = True  # also search with the visitor's own words and merge with the rewritten query (Experiment 8)
     lexical_analyzer: str = "stem+stop"  # BM25 tokenisation: plain | stop | stem | stem+stop (chosen by Experiment 6, evals/lexical_study.py)
     fast_model: str = "google/gemini-2.5-flash-lite"
     strong_model: str = "google/gemini-2.5-flash"

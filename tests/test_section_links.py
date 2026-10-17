@@ -82,3 +82,35 @@ async def test_links_to_pages_that_were_ingested_are_not_listed_as_unread():
         pass
     note = next(line for line in router.system.splitlines() if line.startswith("Linked from this section"))
     assert note == "Linked from this section (not read): Hackathon page"
+
+
+async def test_retrieval_merges_the_rewritten_query_with_the_visitors_own_words():
+    from app.config import settings
+    seen = []
+
+    class TwoWay:
+        async def search(self, q, k=5):
+            seen.append(q)
+            return [{"anchor": "from-rewrite" if q == "rewritten query" else "from-question", "title": "t", "url": "u", "part": 0, "text": "x"}]
+
+    class R(Router):
+        async def complete(self, tier, messages, records, **kw):
+            return json.dumps({"intent": "question", "search_query": "rewritten query", "complex": False, "followup": False})
+
+    router = R("ok [1] [2]")
+    graph = build_graph(router, TwoWay(), Cal())
+    cfg = {"configurable": {"thread_id": uuid.uuid4().hex}}
+    final = {}
+    async for ev in graph.astream({"question": "what about the pilot?", "records": [], "variant": "A"}, cfg, stream_mode="updates"):
+        for upd in ev.values():
+            final.update(upd if isinstance(upd, dict) else {})
+    assert sorted(seen) == ["rewritten query", "what about the pilot?"]
+    assert sorted(c["anchor"] for c in final["chunks"]) == ["from-question", "from-rewrite"]
+    settings.retrieve_raw_too = False
+    try:
+        seen.clear()
+        async for _ in graph.astream({"question": "again?", "records": [], "variant": "A"}, {"configurable": {"thread_id": uuid.uuid4().hex}}, stream_mode="updates"):
+            pass
+        assert seen == ["rewritten query"]
+    finally:
+        settings.retrieve_raw_too = True

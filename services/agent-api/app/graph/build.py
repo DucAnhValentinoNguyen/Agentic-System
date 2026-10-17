@@ -1,5 +1,6 @@
 """LangGraph: classify -> retrieve -> answer (streamed) -> finalize (validated citations)."""
 
+import asyncio
 import datetime as dt
 import operator
 import random
@@ -374,11 +375,28 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
                     for q in s["search_query"].split("; ") if q]
         return "answer"
 
+    async def search_both(query: str, question: str, k: int = 5) -> list[dict]:
+        """Search with the classifier's standalone query AND the visitor's own words, merged by rank (reciprocal rank fusion).
+
+        The rewrite is needed for follow-ups ("how is it trained?") but it can drift: it adds the topic's words, which then
+        match every section of a long topic and bury the one the literal question found (Experiment 7)."""
+        if not settings.retrieve_raw_too or query.strip().lower() == question.strip().lower():
+            return await retriever.search(query, k)
+        by_query, by_question = await asyncio.gather(retriever.search(query, k), retriever.search(question, k))
+        score: dict[tuple, float] = {}
+        chunk_of: dict[tuple, dict] = {}
+        for ranking in (by_query, by_question):
+            for pos, c in enumerate(ranking):
+                key = (c["anchor"], c.get("part", 0))
+                score[key] = score.get(key, 0.0) + 1.0 / (60 + pos)
+                chunk_of.setdefault(key, c)
+        return [chunk_of[key] for key in sorted(score, key=lambda x: -score[x])[:k]]
+
     async def retrieve(state: State) -> dict:
         if settings.rerank != "llm":
-            return {"chunks": await retriever.search(state["search_query"])}
+            return {"chunks": await search_both(state["search_query"], state["question"])}
         recs: list[CallRecord] = []
-        candidates = await retriever.search(state["search_query"], settings.rerank_candidates)
+        candidates = await search_both(state["search_query"], state["question"], settings.rerank_candidates)
         kept = await rerank_chunks(router, state["question"], candidates, settings.rerank_keep, recs)
         return {"chunks": kept, "records": recs}
 

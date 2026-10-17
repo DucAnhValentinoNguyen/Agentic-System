@@ -262,3 +262,30 @@ checks for it automatically. The deploy gate gained six questions whose answers 
 
 **Decision.** Deep corpus on (`python ingest/build_corpus.py`; `--no-deep` rebuilds the old one). The retrieval service now embeds 101 sections at start-up
 (13 requests), which lengthens a cold start by a few seconds; it does not run per question.
+
+
+# Experiment 8: search with the visitor's own words as well as the rewritten query (17 Oct 2026, `evals/followup_deep_study.py`)
+
+**Question.** After Experiment 7 a live follow-up failed: "what recovery objectives does the pilot propose?", asked after a question about the AWS
+challenge, was answered "not published", although the demo page states them. Typed on its own, the same question ranks the right section first. In the
+conversation the classifier had rewritten it into a standalone query full of the topic's words ("Velocity Racing", "report", "demo"), which match
+every one of the 20+ sections on that topic, and the answering section fell out of the top 5. Would also searching with the visitor's literal words, and
+merging both result lists by rank, help?
+
+**Design.** Real classifier, real hybrid retrieval, no answer generation. Nine follow-up questions whose answer is only in a linked page; the earlier turn
+is seeded into the history so the classifier has something to rewrite from; 3 repeats per question because the rewrite varies between runs. Setting
+`RETRIEVE_RAW_TOO` off (rewrite only, the behaviour before) against on (rewrite and raw question, merged by reciprocal rank fusion). Metric: share of the
+sections that hold the answer that appear in the top 5; paired bootstrap over questions.
+
+| | Recall@5 (9 follow-ups x 3) |
+|---|---|
+| rewrite only (before) | 0.611 |
+| **rewrite + raw question merged (after)** | **0.796** (+0.185, 95% interval 0.000 to +0.444) |
+
+Per question: recovery objectives 0.00 to 1.00 (the live failure), break-even 0.00 to 0.67; six others unchanged (four at 1.00); none worse.
+
+**Reading.** Directionally clear and it repairs the observed failure, but nine questions are few and the interval touches zero. Two follow-ups remain
+missed in both modes ("how much is the pilot capped at?" never retrieves its section; "what runs at the track edge" finds half of its sections), so the
+problem is reduced, not solved. One more search per follow-up costs a few milliseconds in-process (an extra gRPC call to the retrieval service).
+
+**Decision.** On by default. Not yet attempted: a reranker pass over the merged candidates (`RERANK=llm` exists, off by default since Experiment 3).
