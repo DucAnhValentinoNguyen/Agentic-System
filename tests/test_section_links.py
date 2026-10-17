@@ -70,3 +70,15 @@ async def test_the_corpus_builder_keeps_each_sections_outgoing_links():
             '<a href="mailto:a@b.c">mail</a> <a href="https://e.org/y">Demo</a></p></section>')
     [chunk] = build(html, "https://site.example/")
     assert chunk["links"] == [{"label": "Report (PDF)", "url": "https://site.example/x.pdf"}, {"label": "Demo", "url": "https://e.org/y"}]
+
+
+async def test_links_to_pages_that_were_ingested_are_not_listed_as_unread():
+    router = Router("anything [1]")
+    links = {"cloud-innovation-challenge": [{"label": "Case-study report (PDF)", "url": "u1", "read": True},
+                                            {"label": "Hackathon page", "url": "u2"}]}
+    graph = build_graph(router, Retriever(), Cal(), section_links=links)
+    cfg = {"configurable": {"thread_id": uuid.uuid4().hex}}
+    async for _ in graph.astream({"question": "q", "records": [], "variant": "A"}, cfg, stream_mode="updates"):
+        pass
+    note = next(line for line in router.system.splitlines() if line.startswith("Linked from this section"))
+    assert note == "Linked from this section (not read): Hackathon page"

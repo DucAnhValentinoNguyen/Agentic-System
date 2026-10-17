@@ -17,6 +17,8 @@ from rank_bm25 import BM25Okapi
 from .config import settings
 
 log = structlog.get_logger()
+LINKED_DISCOUNT = 0.9   # score multiplier for chunks read from linked pages
+EMBED_BATCH = 8   # 8 sections of at most 2,000 characters stay far below the 20,000-token request limit
 TOKEN = re.compile(r"[a-z0-9]+")
 # Words that carry no topic in a question about a person's work. BM25 already down-weights them by idf, but in a 28-chunk corpus
 # "the" and "and" still add noise to every score, so they are dropped. Deliberately short: no content words, no numbers.
@@ -84,8 +86,12 @@ class Index:
     async def warm(self, token: str) -> None:
         self._warm_at = time.monotonic()
         try:
-            self.vectors = await self._embed(
-                [c["title"] + "\n" + c["text"] for c in self.chunks], "RETRIEVAL_DOCUMENT", token)
+            # Vertex limits one request to 20,000 tokens: embed the sections in small batches, not all at once.
+            texts = [c["title"] + "\n" + c["text"] for c in self.chunks]
+            vectors: list[list[float]] = []
+            for i in range(0, len(texts), EMBED_BATCH):
+                vectors += await self._embed(texts[i:i + EMBED_BATCH], "RETRIEVAL_DOCUMENT", token)
+            self.vectors = vectors
         except Exception as e:  # noqa: BLE001
             log.warning("embed_warm_failed", error=str(e)[:200])
 
@@ -110,5 +116,11 @@ class Index:
         for r in ranks:
             for pos, i in enumerate(r):
                 fused[i] += 1.0 / (60 + pos)
+        # The home page is the author's own curated summary; linked pages add detail. A small discount on linked chunks lets a
+        # broad question ("which cloud platforms does he list?") still reach the summary section when a long report on the same
+        # topic also matches (Experiment 7).
+        for i, c in enumerate(self.chunks):
+            if c.get("source") == "linked":
+                fused[i] *= LINKED_DISCOUNT
         top = sorted(range(n), key=lambda i: -fused[i])[:k]
         return [self.chunks[i] for i in top]

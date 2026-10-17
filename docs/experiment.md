@@ -219,3 +219,46 @@ stem "LLMs" to "LLM" (no vowel before the "s"), so a one-line rule for vowel-les
 
 **Decision.** Stemming and stop words are the default (`LEXICAL_ANALYZER=stem+stop`; `plain` restores the old behaviour). Results in
 `evals/results/lexical_bm25.json` and `lexical_hybrid.json`.
+
+
+# Experiment 7: should Twin read the pages the site links to? (17 Oct 2026, `evals/deep_study.py`)
+
+**Question.** Twin knew one short paragraph per section of the home page. The report PDF, the interactive demo and three results pages were links
+whose targets it never read, so a question such as "what does the report say about failover?" could only be answered with "the site only summarises
+this" (Option 1, which hands over the links). Would reading those pages, one level deep and on the same site, make such questions answerable, and what
+would 73 extra chunks cost the questions the home page already answered?
+
+**Design.** The corpus builder reads each same-site page that a home-page section links to (5 pages: 3 HTML results pages, the demo overview and an
+8-page PDF), splits HTML at its headings (table rows keep their cells) and the PDF by page, and records the linking section and the page URL, so a
+citation points at the page the fact came from. Fetching and PDF parsing happen at build time only. Same hybrid retriever (stem + stop words,
+BM25 + Vertex embeddings), k = 5, paired comparison of the home-only corpus (28 chunks) against the deep corpus (101 chunks). *Deep set*: 13
+questions whose answers exist only in linked pages (checked mechanically: the gold phrase occurs in no home-page chunk). *Primary* (35) and *phrasing*
+(16): the earlier sets, whose gold sections are on the home page, to measure harm.
+
+| Set | n | Recall@5 home-only | Recall@5 deep | Change (95% interval) | Questions better / worse |
+|---|---|---|---|---|---|
+| deep (linked-page facts) | 13 | 0.000 | **1.000** | +1.000 (+1.000 to +1.000) | 13 / 0 |
+| primary (home-page facts) | 35 | 0.877 | 0.848 | -0.029 (-0.086 to +0.000) | 0 / 1 |
+| phrasing | 16 | 0.958 | 0.958 | 0.000 | 0 / 0 |
+
+Mean reciprocal rank on the primary set rose from 0.912 to 0.936; on the deep set it is 0.712.
+
+**What went wrong on the way (and was fixed).**
+1. The first deep run silently had no embeddings: embedding all 101 sections in one request exceeded Vertex's 20,000-token limit (HTTP 400), so
+   search fell back to BM25 alone and looked worse than it was. Sections are now embedded in batches of 8 (`EMBED_BATCH`, with a test).
+2. My first harness located the home-page questions' gold sections in the *deep* corpus, which graded the home-only index against sections it could
+   not contain (recall 0.766 instead of 0.877). Gold sections are now located in the home-only snapshot.
+3. With no countermeasure, three broad listing questions got worse (recall -0.037). A cap of two chunks per linked page did not help and cost one
+   deep question, so it was removed. A 10% score discount for linked chunks (the home page is the author's own curated summary, linked pages add
+   detail) removed two of the three. One was chosen after seeing the failures, so the primary-set number is somewhat optimistic.
+
+**Remaining cost.** "Which cloud platforms and services does he list?" now returns the AWS case-study report and demo instead of the Skills section.
+Defensible (the report is about cloud services) but it is a miss against the intended answer. A bigger corpus raises the chance that a long page on
+one topic outranks a short curated summary; the discount lowers it, it does not remove it.
+
+**Risks checked.** Linked pages are untrusted text like any source: a fourth poisoned-document case (an injection hidden in a PDF page) passes
+with the rest of the poison suite (4/4, local server). Facts can conflict between pages; for the five pages read here no conflict was found, but nothing
+checks for it automatically. The deploy gate gained six questions whose answers exist only in linked pages (48 cases run before traffic moves).
+
+**Decision.** Deep corpus on (`python ingest/build_corpus.py`; `--no-deep` rebuilds the old one). The retrieval service now embeds 101 sections at start-up
+(13 requests), which lengthens a cold start by a few seconds; it does not run per question.

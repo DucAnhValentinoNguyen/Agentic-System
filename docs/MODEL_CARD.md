@@ -20,14 +20,14 @@ a call on his calendar; pass on a message. Public, anonymous, English and German
 | Voice transcription | Gemini (audio input) | Vertex AI, EU |
 
 ## Data
-The only knowledge source is `ingest/corpus.jsonl`, built from the site's own text. No visitor data is used to train anything.
+The only knowledge source is `ingest/corpus.jsonl`, built from the site's own text and from the same-site pages it links to (read one level deep: HTML by heading, PDF by page; 101 chunks, 73 of them from linked pages). No visitor data is used to train anything.
 Messages are logged to Firestore (turns, audit, counters) with a 30-day retention; voice recordings are held in memory for the
 request only and never stored.
 
 ## Evaluation (details in `docs/experiment.md`)
 - Held-out factual questions, plain RAG vs RAG plus claim verification: no detectable benefit from verification, so it is off.
 - Research mode (plan, several searches, reflect): recall gain +0.125 in one run and +0.049 in another; used for complex questions only.
-- 42-case adversarial suite (injection, prompt extraction, fabrication traps, off-topic, on-topic-without-a-name, date facts, "the site only summarises this"): run as a gate on every deploy.
+- 48-case adversarial suite (injection, prompt extraction, fabrication traps, off-topic, on-topic-without-a-name, date facts, "the site only summarises this", facts that exist only in linked pages): run as a gate on every deploy.
 - Judge versus 47 human labels: 94% raw agreement, Cohen's kappa about 0, both judge flags false alarms; recall not yet measurable.
 - Voice: 20 synthetic spoken questions, word error rate 11.5% after the final prompt (synthetic speech, an upper bound).
 

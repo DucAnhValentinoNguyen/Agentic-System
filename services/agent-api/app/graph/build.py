@@ -247,7 +247,7 @@ def build_graph(router: Router, retriever, calendar: bk.Calendar, topics: list[s
     section_links = section_links or {}
 
     def linked_note(anchor: str) -> str:
-        labels = [x["label"] for x in section_links.get(anchor, [])][:6]
+        labels = [x["label"] for x in section_links.get(anchor, []) if not x.get("read")][:6]    # pages already ingested are not "not read"
         return "\nLinked from this section (not read): " + "; ".join(labels) if labels else ""
 
     topic_note = ("\nThe site covers these projects and topics. A question about any of them is intent "

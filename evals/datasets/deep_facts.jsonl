@@ -1,0 +1,13 @@
+{"id": "deep-rto", "question": "What recovery time and recovery point objectives does his Velocity Racing pilot propose for failover?", "gold_contains": ["RTO 15 min"], "answer_has": ["15 min"]}
+{"id": "deep-pilot-cap", "question": "How much is the Velocity Racing pilot capped at before the full programme is funded?", "gold_contains": ["capped at €100k"], "answer_has": ["100k", "100,000", "100 k"]}
+{"id": "deep-edge", "question": "What runs at the track edge in his Velocity Racing telemetry design?", "gold_contains": ["AWS IoT Greengrass"], "answer_has": ["greengrass"]}
+{"id": "deep-qr", "question": "How does his Velocity Racing fan platform stop a second scan of the same pass?", "gold_contains": ["atomic conditional write"], "answer_has": ["dynamodb", "conditional write"]}
+{"id": "deep-wildboar-conclusion", "question": "What did the wildboar compensation analysis conclude about compensation and tolerance?", "gold_contains": ["qualified association"], "answer_has": ["qualified association", "not proof"]}
+{"id": "deep-wildboar-limits", "question": "Why can the wildboar study not make causal claims?", "gold_contains": ["cross-sectional, nonrandom"], "answer_has": ["cross-sectional", "nonrandom"]}
+{"id": "deep-training-cost", "question": "How did the Velocity Racing report estimate the SageMaker training cost?", "gold_contains": ["1,200 h of ml.p4d.24xlarge"], "answer_has": ["1,200", "p4d"]}
+{"id": "deep-breakeven", "question": "How many championship positions does the break-even in his Velocity Racing report need?", "gold_contains": ["0.13 of one championship position"], "answer_has": ["0.13"]}
+{"id": "deep-knn", "question": "What protocol did the surgical SSL benchmark use to evaluate frozen features?", "gold_contains": ["weighted-k-NN protocol"], "answer_has": ["k-nn", "knn", "nearest"]}
+{"id": "deep-dropped-classes", "question": "Why were three classes dropped from the HyperKvasir 20-way task?", "gold_contains": ["fewer than 12 labeled images"], "answer_has": ["12"]}
+{"id": "deep-rank", "question": "What was the effective rank of the DINO model after training?", "gold_contains": ["effective rank 14.3 at completion"], "answer_has": ["14.3"]}
+{"id": "deep-position-value", "question": "What is one championship position worth in the Velocity Racing business case?", "gold_contains": ["USD 8–12 M per adjacent position"], "answer_has": ["8", "12"]}
+{"id": "deep-postrace", "question": "Which AWS services answer the post-race analysis requirement in the Velocity Racing report?", "gold_contains": ["Bedrock Knowledge Bases + Guardrails"], "answer_has": ["bedrock"]}

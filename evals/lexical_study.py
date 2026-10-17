@@ -26,8 +26,9 @@ from app.retrieval import Index
 ANALYZERS = ["plain", "stop", "stem", "stem+stop"]
 
 
-def load_cases() -> dict[str, list[dict]]:
-    corpus = [json.loads(line) for line in (ROOT / "ingest/corpus.jsonl").read_text().splitlines()]
+def load_cases(corpus_path: str = "ingest/corpus.jsonl") -> dict[str, list[dict]]:
+    """Gold sections are located in `corpus_path` (by substring of the golden facts), so pass the home-only snapshot to keep them stable."""
+    corpus = [json.loads(line) for line in (ROOT / corpus_path).read_text().splitlines()]
     primary, phrasing = [], []
     for line in (ROOT / "evals/datasets/multihop.jsonl").read_text().splitlines():
         c = json.loads(line)
